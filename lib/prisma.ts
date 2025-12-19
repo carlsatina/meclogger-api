@@ -39,13 +39,14 @@ const readCaFromEnv = (): string | null => {
 
 const getSslConfig = () => {
   // Allow disabling SSL entirely (e.g., local Postgres without TLS).
-  const disableSsl = parseBoolean(process.env.DB_SSL_DISABLE, false)
+  const { hostname } = new URL(connectionString)
+  const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(hostname)
+  const disableSsl = parseBoolean(process.env.DB_SSL_DISABLE, isLocalHost)
   if (disableSsl) {
     return false
   }
 
   const rejectUnauthorized = parseBoolean(process.env.DB_SSL_REJECT_UNAUTHORIZED, true)
-  const { hostname } = new URL(connectionString)
   const servername = process.env.DB_SSL_SERVERNAME || hostname
 
   const caFromEnv = readCaFromEnv()
