@@ -39,6 +39,7 @@
     "express": "^5.2.1",
     "fs": "^0.0.1-security",
     "jsonwebtoken": "^9.0.2",
+    "minio": "^8.0.2",
     "multer": "^2.0.2",
     "sharp": "^0.33.3",
     "pg": "^8.11.3",

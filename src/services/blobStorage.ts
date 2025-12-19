@@ -2,10 +2,11 @@ import { promises as fs } from 'fs'
 import path from 'path'
 import type { Express } from 'express'
 import type { PutBlobResult } from '@vercel/blob'
+import { Client as MinioClient } from 'minio'
 
 type UploadResult = {
     url: string
-    provider: 'vercel-blob' | 'local'
+    provider: 'vercel-blob' | 'local' | 'minio'
 }
 
 type ProcessedFile = {
@@ -101,6 +102,51 @@ const writeToLocalDisk = async(
     }
 }
 
+const hasMinioConfig = () => {
+    const endpoint = process.env.MINIO_ENDPOINT
+    const accessKey = process.env.MINIO_ACCESS_KEY
+    const secretKey = process.env.MINIO_SECRET_KEY
+    const bucket = process.env.MINIO_BUCKET
+    return Boolean(endpoint && accessKey && secretKey && bucket)
+}
+
+const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<UploadResult> => {
+    const endpoint = process.env.MINIO_ENDPOINT
+    const accessKey = process.env.MINIO_ACCESS_KEY
+    const secretKey = process.env.MINIO_SECRET_KEY
+    const bucket = process.env.MINIO_BUCKET
+    if (!endpoint || !accessKey || !secretKey || !bucket) {
+        throw new Error('Missing MinIO configuration')
+    }
+
+    const useSSL = String(process.env.MINIO_USE_SSL || '').toLowerCase() === 'true'
+    const port = process.env.MINIO_PORT ? Number(process.env.MINIO_PORT) : (useSSL ? 443 : 80)
+    const client = new MinioClient({
+        endPoint: endpoint,
+        port,
+        accessKey,
+        secretKey,
+        useSSL
+    })
+
+    const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const base = sanitizeFileName(path.parse(processed.originalName).name)
+    const objectName = `${folder}/${uniqueSuffix}-${base}.${processed.extension}`
+
+    await client.putObject(bucket, objectName, processed.buffer, {
+        'Content-Type': processed.mimeType
+    })
+
+    const publicBase = process.env.MINIO_PUBLIC_URL
+        || `${useSSL ? 'https' : 'http'}://${endpoint}${process.env.MINIO_PORT ? `:${port}` : ''}`
+    const url = `${publicBase}/${bucket}/${objectName}`
+
+    return {
+        url,
+        provider: 'minio'
+    }
+}
+
 const uploadToVercelBlob = async(file: Express.Multer.File, folder: string, token: string, processed: ProcessedFile) => {
     const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const base = sanitizeFileName(path.parse(processed.originalName).name)
@@ -137,6 +183,14 @@ export const uploadImageToStorage = async(
         } catch (error) {
             // Fall back to local disk when blob upload is not available (e.g., local dev).
             console.warn('Vercel Blob upload failed, falling back to local storage', error)
+        }
+    }
+
+    if (hasMinioConfig()) {
+        try {
+            return await uploadToMinio(processed, folder)
+        } catch (err) {
+            console.warn('MinIO upload failed, falling back to local storage', err)
         }
     }
 
