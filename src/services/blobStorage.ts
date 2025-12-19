@@ -133,7 +133,7 @@ const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<U
     const base = sanitizeFileName(path.parse(processed.originalName).name)
     const objectName = `${folder}/${uniqueSuffix}-${base}.${processed.extension}`
 
-    await client.putObject(bucket, objectName, processed.buffer, {
+    await client.putObject(bucket, objectName, processed.buffer, processed.buffer.length, {
         'Content-Type': processed.mimeType
     })
 
