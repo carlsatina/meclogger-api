@@ -9,7 +9,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
     'https://api.meclogger.com',
     'http://localhost:5173',
     'http://localhost:8080',
-    'http://localhost:9000'
+    'http://localhost:9000',
+    'https://localhost'
 ]
 
 const DEFAULT_ALLOWED_SUFFIXES = ['.meclogger.com']
