@@ -21,6 +21,16 @@ const parseBoolean = (val: string | undefined, fallback: boolean) => {
   return ['1', 'true', 'yes', 'on'].includes(val.toLowerCase())
 }
 
+const getSslMode = () => {
+  try {
+    const params = new URL(connectionString).searchParams
+    const mode = params.get('sslmode')
+    return mode ? mode.toLowerCase() : null
+  } catch {
+    return null
+  }
+}
+
 const readCaFromEnv = (): string | null => {
   const inlineCa = process.env.DB_SSL_CA
   if (inlineCa && inlineCa.trim().length > 0) {
@@ -41,7 +51,9 @@ const getSslConfig = () => {
   // Allow disabling SSL entirely (e.g., local Postgres without TLS).
   const { hostname } = new URL(connectionString)
   const isLocalHost = ['localhost', '127.0.0.1', '::1'].includes(hostname)
-  const disableSsl = parseBoolean(process.env.DB_SSL_DISABLE, isLocalHost)
+  const sslMode = getSslMode()
+  const defaultDisable = process.env.NODE_ENV !== 'production' || isLocalHost
+  const disableSsl = sslMode === 'disable' || parseBoolean(process.env.DB_SSL_DISABLE, defaultDisable)
   if (disableSsl) {
     return false
   }
