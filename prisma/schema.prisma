@@ -1,0 +1,635 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id                String            @id @default(cuid())
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  role              Role              @default(GUEST)
+  fullName          String
+  phone             String            @unique
+  email             String?           @unique
+  password          String?
+  dateOfBirth       DateTime?
+  imageUrl          String?
+  budgets           Budget[]
+  expenses          Expense[]
+  expenseCategories ExpenseCategory[]
+  expenseSchedules  ExpenseSchedule[]
+  subscriptions     Subscription[]
+  accounts          Account[]
+  currencies        UserCurrency[]
+  financialGoals    FinancialGoal[]
+  notifications     Notification[]
+  otps              OtpCode[]
+  profiles          Profile[]
+  vehicles          Vehicle[]
+  preferences       UserPreference?
+}
+
+model UserPreference {
+  id               String   @id @default(cuid())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  userId           String   @unique
+  distanceUnit     String   @default("km")
+  currency         String   @default("PHP")
+  maintenanceTypes String[] @default([])
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model OtpCode {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Profile {
+  id                String             @id @default(cuid())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  userId            String
+  displayName       String
+  relationToUser    String?
+  dateOfBirth       DateTime?
+  gender            String?
+  bloodGroup        String?
+  allergies         String?
+  chronicConditions String?
+  imageUrl          String?
+  records           MedicalRecord[]
+  medications       Medication[]
+  medicineReminders MedicineReminder[]
+  illnesses         IllnessEntry[]
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vitals            VitalEntry[]
+}
+
+model MedicalRecord {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  profileId    String
+  title        String
+  recordType   RecordType  @default(OTHER)
+  recordDate   DateTime
+  providerName String?
+  notes        String?
+  tags         String[]    @default([])
+  files        FileAsset[]
+  profile      Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  shares       ShareLink[]
+
+  @@index([profileId, recordDate])
+  @@index([recordType])
+}
+
+model FileAsset {
+  id           String         @id @default(cuid())
+  createdAt    DateTime       @default(now())
+  recordId     String?
+  url          String
+  mimeType     String?
+  sizeBytes    Int?
+  originalName String?
+  record       MedicalRecord? @relation(fields: [recordId], references: [id], onDelete: Cascade)
+}
+
+model ShareLink {
+  id          String        @id @default(cuid())
+  createdAt   DateTime      @default(now())
+  expiresAt   DateTime?
+  recordId    String
+  token       String        @unique
+  canDownload Boolean       @default(true)
+  targetEmail String?
+  targetPhone String?
+  record      MedicalRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+}
+
+model Medication {
+  id                String             @id @default(cuid())
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  profileId         String
+  name              String
+  dosage            String?
+  instructions      String?
+  startDate         DateTime?
+  endDate           DateTime?
+  inventoryQuantity Int?
+  lowStockThreshold Int?
+  reminders         MedReminder[]
+  profile           Profile            @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  logs              MedicationLog[]
+  medicineReminders MedicineReminder[]
+
+  @@index([profileId])
+}
+
+model MedReminder {
+  id           String            @id @default(cuid())
+  createdAt    DateTime          @default(now())
+  medicationId String
+  frequency    ReminderFrequency @default(DAILY)
+  scheduleJson Json?
+  nextRunAt    DateTime?
+  active       Boolean           @default(true)
+  medication   Medication        @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+}
+
+model MedicationLog {
+  id           String     @id @default(cuid())
+  medicationId String
+  occurredAt   DateTime
+  status       String
+  notes        String?
+  medication   Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+
+  @@index([medicationId, occurredAt])
+}
+
+model VitalEntry {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  profileId   String
+  vitalType   VitalType @default(OTHER)
+  valueNumber Float?
+  unit        String?
+  systolic    Int?
+  diastolic   Int?
+  recordedAt  DateTime  @default(now())
+  notes       String?
+  chartGroup  String?
+  profile     Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, recordedAt])
+  @@index([vitalType])
+}
+
+model IllnessEntry {
+  id                String          @id @default(cuid())
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  profileId         String
+  diagnosis         String
+  symptoms          String[]        @default([])
+  bodyTemperature   Float?
+  temperatureUnit   String?         @default("C")
+  severity          IllnessSeverity @default(MILD)
+  status            IllnessStatus   @default(ONGOING)
+  notes             String?
+  medications       String[]        @default([])
+  recordedAt        DateTime        @default(now())
+  profile           Profile         @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, recordedAt])
+  @@index([severity])
+  @@index([status])
+}
+
+model MedicineReminder {
+  id           String      @id @default(cuid())
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  profileId    String
+  medicineName String
+  unit         String?
+  dosage       Int?        @default(1)
+  frequency    String
+  time         String?
+  times        String[]    @default([])
+  duration     String?
+  intakeMethod String?
+  notes        String?
+  medicationId String?
+  active       Boolean     @default(true)
+  medication   Medication? @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  profile      Profile     @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  userId    String
+  title     String
+  body      String?
+  readAt    DateTime?
+  channel   String?
+  data      Json?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Vehicle {
+  id                     String                  @id @default(cuid())
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  userId                 String
+  vehicleType            VehicleType             @default(CAR)
+  make                   String
+  model                  String
+  year                   Int?
+  color                  String?
+  licensePlate           String?
+  registrationExpiryDate DateTime?
+  vin                    String?                 @unique
+  purchaseDate           DateTime?
+  currentMileage         Int?
+  imageUrl               String?
+  notes                  String?
+  maintenanceHistory     CarMaintenanceHistory[]
+  maintenanceRecords     MaintenanceRecord[]
+  user                   User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reminders              VehicleReminder[]
+
+  @@index([userId])
+}
+
+model MaintenanceRecord {
+  id                 String          @id @default(cuid())
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  vehicleId          String
+  maintenanceType    String          @default("OTHER")
+  title              String
+  description        String?
+  serviceDate        DateTime
+  mileageAtService   Int?
+  servicedBy         String?
+  location           String?
+  cost               Float?
+  currency           String?         @default("USD")
+  partsUsed          String?
+  laborHours         Float?
+  receiptUrl         String?
+  tags               String[]        @default([])
+  nextServiceDue     DateTime?
+  nextServiceMileage Int?
+  vehicle            Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, serviceDate])
+  @@index([maintenanceType])
+}
+
+model CarMaintenanceHistory {
+  id               String                     @id @default(cuid())
+  createdAt        DateTime                   @default(now())
+  updatedAt        DateTime                   @updatedAt
+  vehicleId        String
+  maintenanceType  String                     @default("OTHER")
+  title            String
+  description      String?
+  serviceDate      DateTime
+  mileageAtService Int?
+  serviceProvider  String?
+  location         String?
+  cost             Float?
+  currency         String?                    @default("USD")
+  notes            String?
+  attachments      CarMaintenanceAttachment[]
+  vehicle          Vehicle                    @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  parts            CarMaintenancePart[]
+
+  @@index([vehicleId, serviceDate])
+  @@index([maintenanceType])
+}
+
+model CarMaintenancePart {
+  id        String                @id @default(cuid())
+  name      String
+  quantity  Float?                @default(1)
+  unit      String?
+  cost      Float?
+  currency  String?               @default("USD")
+  historyId String
+  history   CarMaintenanceHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@index([historyId])
+}
+
+model CarMaintenanceAttachment {
+  id        String                @id @default(cuid())
+  createdAt DateTime              @default(now())
+  url       String
+  mimeType  String?
+  sizeBytes Int?
+  label     String?
+  historyId String
+  history   CarMaintenanceHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
+
+  @@index([historyId])
+}
+
+model VehicleReminder {
+  id              String          @id @default(cuid())
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  vehicleId       String
+  title           String
+  description     String?
+  maintenanceType String          @default("OTHER")
+  dueDate         DateTime?
+  dueMileage      Int?
+  notifyInAdvance Int?
+  active          Boolean         @default(true)
+  completed       Boolean         @default(false)
+  completedAt     DateTime?
+  vehicle         Vehicle         @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+
+  @@index([vehicleId, dueDate])
+  @@index([active, completed])
+}
+
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  userId    String
+  name      String
+  color     String?
+  icon      String?
+  isDefault Boolean   @default(false)
+  budgets   Budget[]
+  expenses  Expense[]
+  subscriptions Subscription[]
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Expense {
+  id             String           @id @default(cuid())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  userId         String
+  title          String
+  description    String?
+  amount         Float
+  currency       String           @default("USD")
+  expenseDate    DateTime         @default(now())
+  categoryId     String?
+  budgetId       String?
+  subcategory    String?
+  tags           String[]         @default([])
+  paymentMethod  PaymentMethod    @default(CASH)
+  paymentAccount String?
+  vendor         String?
+  location       String?
+  receiptUrl     String?
+  notes          String?
+  isRecurring    Boolean          @default(false)
+  frequency      ExpenseFrequency @default(ONE_TIME)
+  recurringUntil DateTime?
+  category       ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  budget         Budget?          @relation(fields: [budgetId], references: [id])
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  schedules      ExpenseSchedule[]
+
+  @@index([userId, expenseDate])
+  @@index([categoryId])
+  @@index([budgetId])
+  @@index([isRecurring])
+}
+
+model Budget {
+  id             String           @id @default(cuid())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  userId         String
+  name           String
+  amount         Float
+  spent          Float            @default(0)
+  currency       String           @default("USD")
+  startDate      DateTime
+  endDate        DateTime
+  categoryId     String?
+  alertThreshold Float?
+  alertEnabled   Boolean          @default(true)
+  active         Boolean          @default(true)
+  category       ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  expenses       Expense[]
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, startDate, endDate])
+  @@index([categoryId])
+  @@index([active])
+}
+
+model FinancialGoal {
+  id            String    @id @default(cuid())
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  userId        String
+  title         String
+  description   String?
+  targetAmount  Float
+  currentAmount Float     @default(0)
+  currency      String    @default("USD")
+  targetDate    DateTime?
+  completed     Boolean   @default(false)
+  completedAt   DateTime?
+  color         String?
+  icon          String?
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([completed])
+}
+
+model ExpenseSchedule {
+  id        String           @id @default(cuid())
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  userId    String
+  expenseId String?
+  title     String
+  amount    Float
+  currency  String           @default("USD")
+  startDate DateTime
+  endDate   DateTime?
+  frequency ExpenseFrequency @default(MONTHLY)
+  nextRunAt DateTime?
+  lastRunAt DateTime?
+  active    Boolean          @default(true)
+  expense   Expense?         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+  @@index([expenseId])
+  @@index([frequency])
+}
+
+model Subscription {
+  id             String           @id @default(cuid())
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  userId         String
+  title          String
+  description    String?
+  amount         Float
+  currency       String           @default("USD")
+  billingCycle   ExpenseFrequency @default(MONTHLY)
+  nextBillingDate DateTime?
+  lastBilledAt   DateTime?
+  categoryId     String?
+  vendor         String?
+  paymentMethod  PaymentMethod    @default(CASH)
+  paymentAccount String?
+  active         Boolean          @default(true)
+  autoPay        Boolean          @default(false)
+  cancelAt       DateTime?
+  notes          String?
+  category       ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, active])
+  @@index([categoryId])
+  @@index([billingCycle])
+}
+
+model Account {
+  id          String    @id @default(cuid())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  userId      String
+  name        String
+  institution String?
+  type        String?
+  currency    String    @default("PHP")
+  balance     Float?    @default(0)
+  isDefault   Boolean   @default(false)
+  archived    Boolean   @default(false)
+  notes       String?
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, isDefault])
+}
+
+model UserCurrency {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  code      String
+  name      String?
+  symbol    String?
+  isDefault Boolean  @default(false)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@unique([userId, code])
+  @@index([userId, isDefault])
+}
+
+enum Role {
+  GUEST
+  USER
+  ADMIN
+}
+
+enum RecordType {
+  PRESCRIPTION
+  DIAGNOSIS
+  LAB_RESULT
+  IMAGING
+  VACCINATION
+  DISCHARGE_SUMMARY
+  OTHER
+}
+
+enum VitalType {
+  HEART_RATE
+  BLOOD_PRESSURE_SYSTOLIC
+  BLOOD_PRESSURE_DIASTOLIC
+  BLOOD_GLUCOSE
+  SPO2
+  TEMPERATURE
+  WEIGHT
+  HEIGHT
+  BMI
+  RESPIRATORY_RATE
+  OTHER
+}
+
+enum IllnessSeverity {
+  MILD
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+enum IllnessStatus {
+  ONGOING
+  RECOVERED
+  RESOLVED
+  CHRONIC
+}
+
+enum ReminderFrequency {
+  ONCE
+  HOURLY
+  DAILY
+  WEEKLY
+  CUSTOM
+}
+
+enum VehicleType {
+  CAR
+  SUV
+  PICKUP
+  MOTORCYCLE
+  TRUCK
+  VAN
+  OTHER
+}
+
+enum MaintenanceType {
+  OIL_CHANGE
+  BRAKE_PAD_REPLACEMENT
+  TIRE_ROTATION
+  TIRE_REPLACEMENT
+  BATTERY_REPLACEMENT
+  AIR_FILTER_REPLACEMENT
+  TRANSMISSION_SERVICE
+  COOLANT_FLUSH
+  SPARK_PLUG_REPLACEMENT
+  BRAKE_FLUID_CHANGE
+  ALIGNMENT
+  INSPECTION
+  REPAIR
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  MOBILE_PAYMENT
+  CHECK
+  OTHER
+}
+
+enum ExpenseFrequency {
+  ONE_TIME
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}

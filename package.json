@@ -1,0 +1,68 @@
+{
+  "name": "meclogger",
+  "version": "0.1.0",
+  "description": "meclogger backend API",
+  "main": "index.js",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "scripts": {
+    "build": "npx prisma generate && npx tsc",
+    "start": "node index.js",
+    "prod": "concurrently \"npx tsc --watch\" \"nodemon -q dist/index.js\"",
+    "dev": "NODE_ENV=development nodemon index.ts",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "postinstall": "prisma generate",
+    "prisma:migrate:deploy": "npx prisma migrate deploy"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/carlsatina/meclogger.git"
+  },
+  "keywords": [
+    "HealthRecords"
+  ],
+  "author": "RC Satina",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/carlsatina/meclogger/issues"
+  },
+  "homepage": "https://github.com/carlsatina/meclogger#readme",
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.1.0",
+    "@prisma/client": "^7.1.0",
+    "@vercel/blob": "^0.24.0",
+    "@types/multer": "^2.0.0",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.2.1",
+    "fs": "^0.0.1-security",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "sharp": "^0.33.3",
+    "pg": "^8.11.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.14",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.3",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.10.3",
+    "@types/swagger-jsdoc": "^6.0.3",
+    "@types/swagger-ui-express": "^4.1.6",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.0.1",
+    "prisma": "^7.1.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.2.2"
+  },
+  "overrides": {
+    "glob": "^10.3.10",
+    "swagger-parser": "npm:@apidevtools/swagger-parser@12.1.0",
+    "@apidevtools/swagger-parser": "^12.1.0"
+  }
+}

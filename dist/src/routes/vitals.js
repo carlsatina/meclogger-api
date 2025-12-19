@@ -1,0 +1,26 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const express_1 = require("express");
+const vitalsController_1 = require("../controller/vitalsController");
+const makeVitalsRouter = (_dbClient, authenticateUser) => {
+    const router = (0, express_1.Router)();
+    router.post('/blood-pressure', authenticateUser, vitalsController_1.createBloodPressureRecord);
+    router.put('/blood-pressure/:id', authenticateUser, vitalsController_1.updateBloodPressureRecord);
+    router.get('/blood-pressure/:id', authenticateUser, vitalsController_1.getBloodPressureRecord);
+    router.get('/blood-pressure', authenticateUser, vitalsController_1.getBloodPressureRecords);
+    router.post('/blood-sugar', authenticateUser, vitalsController_1.createBloodSugarRecord);
+    router.put('/blood-sugar/:id', authenticateUser, vitalsController_1.updateBloodSugarRecord);
+    router.get('/blood-sugar/:id', authenticateUser, vitalsController_1.getBloodSugarRecord);
+    router.get('/blood-sugar', authenticateUser, vitalsController_1.getBloodSugarRecords);
+    router.post('/body-weight', authenticateUser, vitalsController_1.createBodyWeightRecord);
+    router.put('/body-weight/:id', authenticateUser, vitalsController_1.updateBodyWeightRecord);
+    router.get('/body-weight/:id', authenticateUser, vitalsController_1.getBodyWeightRecord);
+    router.get('/body-weight', authenticateUser, vitalsController_1.getBodyWeightRecords);
+    router.post('/illness', authenticateUser, vitalsController_1.createIllnessRecord);
+    router.get('/illness', authenticateUser, vitalsController_1.getIllnessRecords);
+    router.get('/illness/:id', authenticateUser, vitalsController_1.getIllnessRecord);
+    router.put('/illness/:id', authenticateUser, vitalsController_1.updateIllnessRecord);
+    router.delete('/illness/:id', authenticateUser, vitalsController_1.deleteIllnessRecord);
+    return router;
+};
+exports.default = makeVitalsRouter;
