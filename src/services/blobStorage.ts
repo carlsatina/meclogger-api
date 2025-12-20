@@ -7,7 +7,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 
 type UploadResult = {
     url: string
-    provider: 'vercel-blob' | 'local' | 'minio'
+    provider: 'vercel-blob' | 'local' | 'minio' | 'r2'
 }
 
 type ProcessedFile = {
