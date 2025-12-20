@@ -3,6 +3,7 @@ import path from 'path'
 import type { Express } from 'express'
 import type { PutBlobResult } from '@vercel/blob'
 import { Client as MinioClient } from 'minio'
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3'
 
 type UploadResult = {
     url: string
@@ -110,6 +111,14 @@ const hasMinioConfig = () => {
     return Boolean(endpoint && accessKey && secretKey && bucket)
 }
 
+const hasR2Config = () => {
+    const endpoint = process.env.R2_ENDPOINT
+    const accessKey = process.env.R2_ACCESS_KEY
+    const secretKey = process.env.R2_SECRET_KEY
+    const bucket = process.env.R2_BUCKET
+    return Boolean(endpoint && accessKey && secretKey && bucket)
+}
+
 const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<UploadResult> => {
     const endpoint = process.env.MINIO_ENDPOINT
     const accessKey = process.env.MINIO_ACCESS_KEY
@@ -147,6 +156,52 @@ const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<U
     }
 }
 
+const uploadToR2 = async(processed: ProcessedFile, folder: string): Promise<UploadResult> => {
+    const endpoint = process.env.R2_ENDPOINT
+    const accessKey = process.env.R2_ACCESS_KEY
+    const secretKey = process.env.R2_SECRET_KEY
+    const bucket = process.env.R2_BUCKET
+    const region = process.env.R2_REGION || 'auto'
+    if (!endpoint || !accessKey || !secretKey || !bucket) {
+        throw new Error('Missing R2 configuration')
+    }
+
+    const cleanEndpoint = endpoint.replace(/\/+$/, '')
+
+    const s3 = new S3Client({
+        region,
+        endpoint: cleanEndpoint,
+        credentials: {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey
+        },
+        forcePathStyle: true
+    })
+
+    const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+    const base = sanitizeFileName(path.parse(processed.originalName).name)
+    const key = `${folder}/${uniqueSuffix}-${base}.${processed.extension}`
+
+    await s3.send(new PutObjectCommand({
+        Bucket: bucket,
+        Key: key,
+        Body: processed.buffer,
+        ContentType: processed.mimeType
+    }))
+
+    const publicBase = (() => {
+        if (process.env.R2_PUBLIC_URL) return process.env.R2_PUBLIC_URL.replace(/\/+$/, '')
+        const accountId = process.env.R2_ACCOUNT_ID
+        if (accountId) {
+            return `https://${bucket}.${accountId}.r2.cloudflarestorage.com`
+        }
+        return `${cleanEndpoint}/${bucket}`
+    })()
+    const url = `${publicBase}/${key}`
+
+    return { url, provider: 'r2' as const }
+}
+
 const uploadToVercelBlob = async(file: Express.Multer.File, folder: string, token: string, processed: ProcessedFile) => {
     const uniqueSuffix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
     const base = sanitizeFileName(path.parse(processed.originalName).name)
@@ -181,8 +236,15 @@ export const uploadImageToStorage = async(
         try {
             return await uploadToVercelBlob(file, folder, token, processed)
         } catch (error) {
-            // Fall back to local disk when blob upload is not available (e.g., local dev).
-            console.warn('Vercel Blob upload failed, falling back to local storage', error)
+            console.warn('Vercel Blob upload failed, falling back to other providers', error)
+        }
+    }
+
+    if (hasR2Config()) {
+        try {
+            return await uploadToR2(processed, folder)
+        } catch (err) {
+            console.warn('R2 upload failed, falling back to other providers', err)
         }
     }
 
