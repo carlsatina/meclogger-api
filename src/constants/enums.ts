@@ -4,7 +4,8 @@
 export enum Role {
   GUEST = 'GUEST',
   USER = 'USER',
-  ADMIN = 'ADMIN'
+  ADMIN = 'ADMIN',
+  FAMILY = 'FAMILY'
 }
 
 export enum RecordType {

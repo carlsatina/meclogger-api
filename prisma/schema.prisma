@@ -30,7 +30,78 @@ model User {
   otps              OtpCode[]
   profiles          Profile[]
   vehicles          Vehicle[]
+  logbookPayments   LogbookPayment[]
+  logbookRenters    LogbookRenter[]
+  logbookSavings    LogbookSaving[]
+  logbookBorrowed   LogbookBorrowed[]
   preferences       UserPreference?
+}
+
+model LogbookPayment {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  userId         String
+  paymentDate    DateTime @default(now())
+  mainCategory   String?
+  subCategory    String?
+  description    String?
+  amount         Float    @default(0)
+  runningBalance Float    @default(0)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, paymentDate])
+}
+
+model LogbookRenter {
+  id             String   @id @default(cuid())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  userId         String
+  firstName      String?
+  lastName       String?
+  contactNo      String?
+  email          String?
+  apartment      String?
+  rentalAmount   Float?
+  transferDate   DateTime?
+  remarks        String?
+  status         String   @default("ACTIVE")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, transferDate])
+}
+
+model LogbookSaving {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  entryDate DateTime @default(now())
+  amount    Float    @default(0)
+  option    String   @default("CASH_IN")
+  source    String?
+  notes     String?
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, entryDate])
+}
+
+model LogbookBorrowed {
+  id           String   @id @default(cuid())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  userId       String
+  entryDate    DateTime @default(now())
+  amount       Float    @default(0)
+  option       String   @default("BORROW")
+  counterparty String?
+  dueDate      DateTime?
+  status       String   @default("UNPAID")
+  notes        String?
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, entryDate])
 }
 
 model UserPreference {
@@ -540,6 +611,7 @@ enum Role {
   GUEST
   USER
   ADMIN
+  FAMILY
 }
 
 enum RecordType {

@@ -7,6 +7,7 @@ import medicalRecordsRouter from './src/routes/medicalRecords'
 import medicineReminderRouter from './src/routes/medicineReminders'
 import carMaintenanceRouter from './src/routes/carMaintenance'
 import expenseRouter from './src/routes/expense'
+import logbookRouter from './src/routes/logbook'
 import prisma from './lib/prisma'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
@@ -70,6 +71,7 @@ app.use('/api/v1/medical-records', medicalRecordsRouter(dbClient, authenticateUs
 app.use('/api/v1/medicine-reminders', medicineReminderRouter(dbClient, authenticateUser))
 app.use('/api/v1/car-maintenance', carMaintenanceRouter(dbClient, authenticateUser))
 app.use('/api/v1/expenses', expenseRouter(dbClient, authenticateUser))
+app.use('/api/v1/logbook', logbookRouter(dbClient, authenticateUser))
 
 // Global error handler for uploads and other middleware
 app.use((err: any, _req: any, res: any, _next: any) => {
