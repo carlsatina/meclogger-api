@@ -714,6 +714,60 @@ const updateIllnessRecord = async (req: ExtendedRequest, res: any) => {
     })
 }
 
+const deleteBloodPressureRecord = async (req: ExtendedRequest, res: any) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const entryId = req.params.id
+    const existing = await findEntryForUser(user.id, entryId)
+    if (!existing || existing.vitalType !== VitalType.BLOOD_PRESSURE_SYSTOLIC) {
+        return res.status(404).json({
+            status: 404,
+            message: 'Blood pressure record not found.'
+        })
+    }
+
+    await prisma.vitalEntry.delete({ where: { id: entryId } })
+
+    return res.status(204).send()
+}
+
+const deleteBloodSugarRecord = async (req: ExtendedRequest, res: any) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const entryId = req.params.id
+    const existing = await findEntryForUser(user.id, entryId)
+    if (!existing || existing.vitalType !== VitalType.BLOOD_GLUCOSE) {
+        return res.status(404).json({
+            status: 404,
+            message: 'Blood sugar record not found.'
+        })
+    }
+
+    await prisma.vitalEntry.delete({ where: { id: entryId } })
+
+    return res.status(204).send()
+}
+
+const deleteBodyWeightRecord = async (req: ExtendedRequest, res: any) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const entryId = req.params.id
+    const existing = await findEntryForUser(user.id, entryId)
+    if (!existing || existing.vitalType !== VitalType.WEIGHT) {
+        return res.status(404).json({
+            status: 404,
+            message: 'Body weight record not found.'
+        })
+    }
+
+    await prisma.vitalEntry.delete({ where: { id: entryId } })
+
+    return res.status(204).send()
+}
+
 const deleteIllnessRecord = async (req: ExtendedRequest, res: any) => {
     const user = ensureUser(req, res)
     if (!user) return
@@ -750,6 +804,9 @@ export {
     updateBloodPressureRecord,
     updateBloodSugarRecord,
     updateBodyWeightRecord,
+    deleteBloodPressureRecord,
+    deleteBloodSugarRecord,
+    deleteBodyWeightRecord,
     createIllnessRecord,
     getIllnessRecords,
     getIllnessRecord,

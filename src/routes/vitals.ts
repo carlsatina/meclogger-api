@@ -3,12 +3,15 @@ import { PrismaClient } from '@prisma/client'
 import {
     createBloodPressureRecord,
     updateBloodPressureRecord,
+    deleteBloodPressureRecord,
     getBloodPressureRecord,
     createBloodSugarRecord,
     updateBloodSugarRecord,
+    deleteBloodSugarRecord,
     getBloodSugarRecord,
     createBodyWeightRecord,
     updateBodyWeightRecord,
+    deleteBodyWeightRecord,
     getBodyWeightRecord,
     getBodyWeightRecords,
     getBloodPressureRecords,
@@ -28,14 +31,17 @@ const makeVitalsRouter = (
 
     router.post('/blood-pressure', authenticateUser, createBloodPressureRecord)
     router.put('/blood-pressure/:id', authenticateUser, updateBloodPressureRecord)
+    router.delete('/blood-pressure/:id', authenticateUser, deleteBloodPressureRecord)
     router.get('/blood-pressure/:id', authenticateUser, getBloodPressureRecord)
     router.get('/blood-pressure', authenticateUser, getBloodPressureRecords)
     router.post('/blood-sugar', authenticateUser, createBloodSugarRecord)
     router.put('/blood-sugar/:id', authenticateUser, updateBloodSugarRecord)
+    router.delete('/blood-sugar/:id', authenticateUser, deleteBloodSugarRecord)
     router.get('/blood-sugar/:id', authenticateUser, getBloodSugarRecord)
     router.get('/blood-sugar', authenticateUser, getBloodSugarRecords)
     router.post('/body-weight', authenticateUser, createBodyWeightRecord)
     router.put('/body-weight/:id', authenticateUser, updateBodyWeightRecord)
+    router.delete('/body-weight/:id', authenticateUser, deleteBodyWeightRecord)
     router.get('/body-weight/:id', authenticateUser, getBodyWeightRecord)
     router.get('/body-weight', authenticateUser, getBodyWeightRecords)
     router.post('/illness', authenticateUser, createIllnessRecord)
