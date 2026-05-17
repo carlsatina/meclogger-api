@@ -424,3 +424,77 @@ export async function generateSpendingInsights(
 
   throw new Error(`Unsupported AI provider: ${provider}`)
 }
+
+// ─── Quick-Add Expense Parser ─────────────────────────────────────────────────
+
+export interface QuickExpenseParse {
+  title: string
+  amount: number
+  categoryId: string | null
+  budgetId: string | null
+  notes: string | null
+}
+
+const QUICK_ADD_PROMPT = `You are an expense parser. The user typed a short natural-language expense entry. Extract the fields and return ONLY a JSON object — no markdown, no explanation.
+
+Return exactly this shape:
+{
+  "title": "merchant or description (title-cased)",
+  "amount": 0.00,
+  "categoryId": "id from provided categories list, or null",
+  "budgetId": "id from provided budgets list, or null",
+  "notes": "any extra context the user included, or null"
+}
+
+Rules:
+- amount must be a positive number (no currency symbol)
+- Match categoryId to the most fitting category name based on the merchant/description
+- Match budgetId to the most fitting active budget — prefer budgets whose categoryId matches the chosen category; if no category match exists, pick the most general active budget; if nothing fits, return null
+- If the user explicitly names a budget, prefer that
+- title should be clean and concise — capitalise properly (e.g. "Myjoy" not "myjoy")
+- Return null for any field you cannot confidently fill`
+
+export async function parseQuickExpense(
+  provider: string,
+  apiKey: string,
+  text: string,
+  categories: Array<{ id: string; name: string }>,
+  budgets: Array<{ id: string; name: string; categoryId: string | null }>
+): Promise<QuickExpenseParse> {
+  const userMessage = `Parse this expense entry: "${text}"
+
+Available categories: ${categories.length ? JSON.stringify(categories) : 'none'}
+Available active budgets: ${budgets.length ? JSON.stringify(budgets) : 'none'}
+
+Return the JSON object.`
+
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey })
+    const response = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      system: QUICK_ADD_PROMPT,
+      messages: [{ role: 'user', content: userMessage }]
+    })
+    const block = response.content.find(b => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('No response')
+    return parseResult<QuickExpenseParse>(block.text)
+  }
+
+  if (provider === 'openai') {
+    const client = new OpenAI({ apiKey })
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: QUICK_ADD_PROMPT },
+        { role: 'user', content: userMessage }
+      ]
+    })
+    const t = response.choices[0]?.message?.content
+    if (!t) throw new Error('No response')
+    return parseResult<QuickExpenseParse>(t)
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}

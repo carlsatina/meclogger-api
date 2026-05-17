@@ -2,6 +2,7 @@ import prisma from '../../lib/prisma'
 import { ExtendedRequest } from '../../extendedRequest'
 import { ExpenseFrequency, PaymentMethod } from '@prisma/client'
 import { Response } from 'express'
+import { parseQuickExpense } from '../services/aiService'
 
 const ensureUser = (req: ExtendedRequest, res: Response) => {
     if (!req.user) {
@@ -1198,4 +1199,98 @@ function decrementBudgetSpent(userId: string, amount: number, expenseDate: Date,
         }))
         await Promise.all(updates)
     })
+}
+
+// ─── Quick-Add (AI-powered natural-language entry) ────────────────────────────
+
+function fallbackParse(text: string): { title: string; amount: number } {
+    const match = text.match(/(\d+(?:[.,]\d+)?)/)
+    const amount = match ? parseFloat(match[1].replace(',', '.')) : 0
+    const title = text.replace(/\d+(?:[.,]\d+)?/, '').trim() || 'Expense'
+    return { title: title.replace(/\b\w/g, c => c.toUpperCase()), amount }
+}
+
+export const quickAddExpense = async (req: ExtendedRequest, res: Response) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const { text } = req.body || {}
+    if (!text || typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json({ status: 400, message: 'text is required' })
+    }
+
+    const today = new Date()
+
+    const [categories, budgets, prefs] = await Promise.all([
+        prisma.expenseCategory.findMany({ where: { userId: user.id }, select: { id: true, name: true } }),
+        prisma.budget.findMany({
+            where: { userId: user.id, active: true, startDate: { lte: today }, endDate: { gte: today } },
+            select: { id: true, name: true, categoryId: true }
+        }),
+        prisma.userPreference.findUnique({ where: { userId: user.id } })
+    ])
+
+    let parsed: { title: string; amount: number; categoryId: string | null; budgetId: string | null; notes: string | null }
+
+    const aiProvider = prefs?.aiProvider || ''
+    const aiApiKey = prefs?.aiApiKey || ''
+
+    if (aiProvider && aiApiKey) {
+        try {
+            parsed = await parseQuickExpense(aiProvider, aiApiKey, text.trim(), categories, budgets)
+        } catch {
+            const fb = fallbackParse(text.trim())
+            parsed = { ...fb, categoryId: null, budgetId: null, notes: null }
+        }
+    } else {
+        const fb = fallbackParse(text.trim())
+        parsed = { ...fb, categoryId: null, budgetId: null, notes: null }
+    }
+
+    if (!parsed.title || isNaN(parsed.amount) || parsed.amount <= 0) {
+        return res.status(400).json({ status: 400, message: 'Could not parse a valid title and amount from the input' })
+    }
+
+    const currency = prefs?.currency || 'PHP'
+
+    // Validate category/budget belong to this user
+    if (parsed.categoryId) {
+        const cat = await prisma.expenseCategory.findFirst({ where: { id: parsed.categoryId, userId: user.id } })
+        if (!cat) parsed.categoryId = null
+    }
+    if (parsed.budgetId) {
+        const bud = await prisma.budget.findFirst({ where: { id: parsed.budgetId, userId: user.id, active: true } })
+        if (!bud) parsed.budgetId = null
+    }
+
+    const expense = await prisma.$transaction(async tx => {
+        const created = await tx.expense.create({
+            data: {
+                userId: user.id,
+                title: parsed.title,
+                amount: parsed.amount,
+                currency,
+                expenseDate: today,
+                categoryId: parsed.categoryId || null,
+                budgetId: parsed.budgetId || null,
+                notes: parsed.notes || null,
+                paymentMethod: PaymentMethod.CASH,
+                isRecurring: false,
+                frequency: ExpenseFrequency.ONE_TIME,
+                tags: [],
+            }
+        })
+
+        const budgetsToUpdate = await resolveBudgetsForExpense(user.id, today, created.categoryId, parsed.budgetId || undefined)
+        if (budgetsToUpdate.length) {
+            await Promise.all(budgetsToUpdate.map(b => tx.budget.update({
+                where: { id: b.id },
+                data: { spent: (b.spent || 0) + parsed.amount }
+            })))
+        }
+
+        return created
+    })
+
+    res.status(201).json({ status: 201, expense })
 }

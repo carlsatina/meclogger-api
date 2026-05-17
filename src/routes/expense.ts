@@ -36,7 +36,8 @@ import {
     listCurrencies,
     createCurrency,
     updateCurrency,
-    deleteCurrency
+    deleteCurrency,
+    quickAddExpense
 } from '../controller/expenseController'
 
 const makeExpenseRouter = (
@@ -48,6 +49,7 @@ const makeExpenseRouter = (
     // Expenses
     router.get('/', authenticateUser, listExpenses)
     router.post('/', authenticateUser, createExpense)
+    router.post('/quick-add', authenticateUser, quickAddExpense)
 
     // Categories
     router.get('/categories/list', authenticateUser, listCategories)
