@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
 import prisma from '../../lib/prisma'
-import { generateHealthInsights, extractPrescription, extractLabReport, HealthInsightInput } from '../services/aiService'
+import { generateHealthInsights, extractPrescription, extractLabReport, generateSpendingInsights, HealthInsightInput, SpendingInsightInput } from '../services/aiService'
 
 function ensureUser(req: Request, res: Response): any {
     const user = (req as any).user
@@ -106,6 +106,105 @@ export const getHealthInsights = async (req: Request, res: Response) => {
 
     try {
         const insights = await generateHealthInsights(aiProvider, aiApiKey, data)
+        return res.status(200).json({ status: 200, insights })
+    } catch (error: any) {
+        const message = error?.message || 'AI service error'
+        const isKeyError = message.toLowerCase().includes('api key') ||
+            message.toLowerCase().includes('authentication') ||
+            message.toLowerCase().includes('unauthorized') ||
+            message.toLowerCase().includes('invalid')
+        return res.status(isKeyError ? 401 : 500).json({
+            status: isKeyError ? 401 : 500,
+            message: isKeyError ? 'Invalid API key. Check your AI settings.' : message
+        })
+    }
+}
+
+export const getSpendingInsights = async (req: Request, res: Response) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const days = Math.min(parseInt(req.query.days as string) || 30, 90)
+    const now = new Date()
+    const currentStart = new Date(now.getTime() - days * 24 * 60 * 60 * 1000)
+    const previousStart = new Date(currentStart.getTime() - days * 24 * 60 * 60 * 1000)
+
+    const prefs = await prisma.userPreference.findUnique({ where: { userId: user.id } })
+    const aiProvider = prefs?.aiProvider || ''
+    const aiApiKey = prefs?.aiApiKey || ''
+
+    if (!aiProvider || !aiApiKey) {
+        return res.status(422).json({
+            status: 422,
+            message: 'AI provider not configured. Go to Settings and add your API key.'
+        })
+    }
+
+    const [currentExpenses, previousExpenses, budgets, subscriptions, goals, categories] = await Promise.all([
+        prisma.expense.findMany({
+            where: { userId: user.id, expenseDate: { gte: currentStart, lte: now } },
+            include: { category: true }
+        }),
+        prisma.expense.findMany({
+            where: { userId: user.id, expenseDate: { gte: previousStart, lt: currentStart } },
+            include: { category: true }
+        }),
+        prisma.budget.findMany({ where: { userId: user.id, active: true } }),
+        prisma.subscription.findMany({ where: { userId: user.id, active: true } }),
+        prisma.financialGoal.findMany({ where: { userId: user.id, completed: false } }),
+        prisma.expenseCategory.findMany({ where: { userId: user.id } })
+    ])
+
+    const categoryMap = new Map(categories.map(c => [c.id, c.name]))
+    const defaultCurrency = currentExpenses[0]?.currency || 'USD'
+
+    const groupByCategory = (expenses: typeof currentExpenses) => {
+        const map = new Map<string, { name: string; amount: number; count: number }>()
+        for (const e of expenses) {
+            const name = e.categoryId ? (categoryMap.get(e.categoryId) || 'Uncategorized') : 'Uncategorized'
+            const existing = map.get(name) || { name, amount: 0, count: 0 }
+            existing.amount = Math.round((existing.amount + e.amount) * 100) / 100
+            existing.count += 1
+            map.set(name, existing)
+        }
+        return [...map.values()].sort((a, b) => b.amount - a.amount)
+    }
+
+    const currentByCategory = groupByCategory(currentExpenses)
+    const previousByCategory = groupByCategory(previousExpenses)
+    const currentTotal = Math.round(currentExpenses.reduce((s, e) => s + e.amount, 0) * 100) / 100
+    const previousTotal = Math.round(previousExpenses.reduce((s, e) => s + e.amount, 0) * 100) / 100
+
+    const data: SpendingInsightInput = {
+        currency: defaultCurrency,
+        days,
+        currentPeriod: { total: currentTotal, byCategory: currentByCategory },
+        previousPeriod: { total: previousTotal, byCategory: previousByCategory.map(c => ({ name: c.name, amount: c.amount })) },
+        budgets: budgets.map(b => ({
+            name: b.name,
+            amount: b.amount,
+            spent: b.spent,
+            currency: b.currency,
+            alertThreshold: b.alertThreshold
+        })),
+        subscriptions: subscriptions.map(s => ({
+            title: s.title,
+            amount: s.amount,
+            currency: s.currency,
+            billingCycle: s.billingCycle
+        })),
+        goals: goals.map(g => ({
+            title: g.title,
+            targetAmount: g.targetAmount,
+            currentAmount: g.currentAmount,
+            currency: g.currency,
+            targetDate: g.targetDate?.toISOString() || null,
+            percentComplete: g.targetAmount > 0 ? Math.round((g.currentAmount / g.targetAmount) * 100) : 0
+        }))
+    }
+
+    try {
+        const insights = await generateSpendingInsights(aiProvider, aiApiKey, data)
         return res.status(200).json({ status: 200, insights })
     } catch (error: any) {
         const message = error?.message || 'AI service error'

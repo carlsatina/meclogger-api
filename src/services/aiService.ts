@@ -136,9 +136,9 @@ Rules:
 - All string values should be plain text, no markdown
 - recordDate must be YYYY-MM-DD or null`
 
-function parseResult(text: string): HealthInsightResult {
+function parseResult<T = HealthInsightResult>(text: string): T {
   const cleaned = text.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim()
-  return JSON.parse(cleaned)
+  return JSON.parse(cleaned) as T
 }
 
 export async function generateHealthInsights(
@@ -309,6 +309,117 @@ export async function extractLabReport(
     const text = response.choices[0]?.message?.content
     if (!text) throw new Error('No response from OpenAI')
     return JSON.parse(text.replace(/^```json\s*/i, '').replace(/\s*```$/, '').trim())
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}
+
+// ─── Spending Insights ────────────────────────────────────────────────────────
+
+export interface SpendingInsightInput {
+  currency: string
+  days: number
+  currentPeriod: {
+    total: number
+    byCategory: Array<{ name: string; amount: number; count: number }>
+  }
+  previousPeriod: {
+    total: number
+    byCategory: Array<{ name: string; amount: number }>
+  }
+  budgets: Array<{ name: string; amount: number; spent: number; currency: string; alertThreshold: number | null }>
+  subscriptions: Array<{ title: string; amount: number; currency: string; billingCycle: string }>
+  goals: Array<{ title: string; targetAmount: number; currentAmount: number; currency: string; targetDate: string | null; percentComplete: number }>
+}
+
+export interface SpendingInsightResult {
+  summary: string
+  topCategories: Array<{ name: string; amount: number; percentOfTotal: number; trend: 'UP' | 'DOWN' | 'STABLE' | 'NEW'; note: string }>
+  budgetAlerts: Array<{ budgetName: string; severity: 'OVER' | 'WARNING' | 'OK'; percentUsed: number; message: string }>
+  subscriptionSummary: { monthlyTotal: number; count: number; note: string } | null
+  goalProgress: Array<{ title: string; percentComplete: number; note: string }>
+  alerts: Array<{ severity: 'HIGH' | 'MEDIUM' | 'LOW'; message: string }>
+  recommendations: string[]
+}
+
+const SPENDING_SYSTEM_PROMPT = `You are a personal finance analyst. Analyze the provided spending data and return a structured JSON response only — no markdown, no prose outside JSON.
+
+Return exactly this JSON shape:
+{
+  "summary": "2-3 sentence overall financial status for the period",
+  "topCategories": [
+    { "name": "category name", "amount": 0.00, "percentOfTotal": 0, "trend": "UP|DOWN|STABLE|NEW", "note": "one-line observation" }
+  ],
+  "budgetAlerts": [
+    { "budgetName": "name", "severity": "OVER|WARNING|OK", "percentUsed": 0, "message": "one-line status" }
+  ],
+  "subscriptionSummary": { "monthlyTotal": 0.00, "count": 0, "note": "one-line observation" },
+  "goalProgress": [
+    { "title": "goal title", "percentComplete": 0, "note": "one-line observation" }
+  ],
+  "alerts": [
+    { "severity": "HIGH|MEDIUM|LOW", "message": "alert message" }
+  ],
+  "recommendations": ["actionable item 1", "...up to 5"]
+}
+
+Rules:
+- trend: UP if current > previous by >5%, DOWN if less, NEW if no prior data, STABLE otherwise
+- budgetAlerts severity: OVER if percentUsed > 100, WARNING if > alertThreshold (default 80%), OK otherwise
+- Include all budgets in budgetAlerts regardless of severity
+- subscriptionSummary may be null if no subscriptions
+- Keep all text concise and plain — no markdown inside JSON strings
+- This is personal tracking only, not financial advice`
+
+function buildSpendingMessage(data: SpendingInsightInput): string {
+  return `Analyze the following spending data for the past ${data.days} days (currency: ${data.currency}) and return your JSON response.
+
+CURRENT PERIOD (last ${data.days} days):
+Total: ${data.currentPeriod.total}
+By category: ${JSON.stringify(data.currentPeriod.byCategory, null, 2)}
+
+PREVIOUS PERIOD (prior ${data.days} days):
+Total: ${data.previousPeriod.total}
+By category: ${JSON.stringify(data.previousPeriod.byCategory, null, 2)}
+
+BUDGETS: ${JSON.stringify(data.budgets, null, 2)}
+
+ACTIVE SUBSCRIPTIONS: ${JSON.stringify(data.subscriptions, null, 2)}
+
+FINANCIAL GOALS: ${JSON.stringify(data.goals, null, 2)}`
+}
+
+export async function generateSpendingInsights(
+  provider: string,
+  apiKey: string,
+  data: SpendingInsightInput
+): Promise<SpendingInsightResult> {
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey })
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: [{ type: 'text', text: SPENDING_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }] as any,
+      messages: [{ role: 'user', content: buildSpendingMessage(data) }]
+    })
+    const block = response.content.find(b => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('No text response from Anthropic')
+    return parseResult<SpendingInsightResult>(block.text)
+  }
+
+  if (provider === 'openai') {
+    const client = new OpenAI({ apiKey })
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: SPENDING_SYSTEM_PROMPT },
+        { role: 'user', content: buildSpendingMessage(data) }
+      ]
+    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error('No response from OpenAI')
+    return parseResult<SpendingInsightResult>(text)
   }
 
   throw new Error(`Unsupported AI provider: ${provider}`)
