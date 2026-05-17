@@ -11,6 +11,7 @@ import logbookRouter from './src/routes/logbook'
 import insightsRouter from './src/routes/insights'
 import medicationsRouter from './src/routes/medications'
 import labResultsRouter from './src/routes/labResults'
+import settingsRouter from './src/routes/settings'
 import prisma from './lib/prisma'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
@@ -78,6 +79,7 @@ app.use('/api/v1/logbook', logbookRouter(dbClient, authenticateUser))
 app.use('/api/v1/insights', insightsRouter(dbClient, authenticateUser))
 app.use('/api/v1/medications', medicationsRouter(dbClient, authenticateUser))
 app.use('/api/v1/lab-results', labResultsRouter(dbClient, authenticateUser))
+app.use('/api/v1/settings', settingsRouter(dbClient, authenticateUser))
 
 // Global error handler for uploads and other middleware
 app.use((err: any, _req: any, res: any, _next: any) => {
