@@ -8,6 +8,9 @@ import medicineReminderRouter from './src/routes/medicineReminders'
 import carMaintenanceRouter from './src/routes/carMaintenance'
 import expenseRouter from './src/routes/expense'
 import logbookRouter from './src/routes/logbook'
+import insightsRouter from './src/routes/insights'
+import medicationsRouter from './src/routes/medications'
+import labResultsRouter from './src/routes/labResults'
 import prisma from './lib/prisma'
 import cors from 'cors'
 import jwt from 'jsonwebtoken'
@@ -72,6 +75,9 @@ app.use('/api/v1/medicine-reminders', medicineReminderRouter(dbClient, authentic
 app.use('/api/v1/car-maintenance', carMaintenanceRouter(dbClient, authenticateUser))
 app.use('/api/v1/expenses', expenseRouter(dbClient, authenticateUser))
 app.use('/api/v1/logbook', logbookRouter(dbClient, authenticateUser))
+app.use('/api/v1/insights', insightsRouter(dbClient, authenticateUser))
+app.use('/api/v1/medications', medicationsRouter(dbClient, authenticateUser))
+app.use('/api/v1/lab-results', labResultsRouter(dbClient, authenticateUser))
 
 // Global error handler for uploads and other middleware
 app.use((err: any, _req: any, res: any, _next: any) => {

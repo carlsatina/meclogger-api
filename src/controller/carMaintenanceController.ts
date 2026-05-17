@@ -688,7 +688,9 @@ export const getPreferences = async(req: Request, res: Response) => {
             preferences: prefs || {
                 distanceUnit: 'km',
                 currency: 'USD',
-                maintenanceTypes: []
+                maintenanceTypes: [],
+                aiProvider: '',
+                aiApiKey: ''
             }
         })
     } catch (error: any) {
@@ -705,7 +707,9 @@ export const savePreferences = async(req: Request, res: Response) => {
     const {
         distanceUnit = 'km',
         currency = 'USD',
-        maintenanceTypes = []
+        maintenanceTypes = [],
+        aiProvider = '',
+        aiApiKey = ''
     } = req.body || {}
 
     try {
@@ -714,13 +718,17 @@ export const savePreferences = async(req: Request, res: Response) => {
             update: {
                 distanceUnit,
                 currency,
-                maintenanceTypes
+                maintenanceTypes,
+                aiProvider,
+                aiApiKey
             },
             create: {
                 userId: user.id,
                 distanceUnit,
                 currency,
-                maintenanceTypes
+                maintenanceTypes,
+                aiProvider,
+                aiApiKey
             }
         })
         return res.status(200).json({

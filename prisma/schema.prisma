@@ -112,6 +112,8 @@ model UserPreference {
   distanceUnit     String   @default("km")
   currency         String   @default("PHP")
   maintenanceTypes String[] @default([])
+  aiProvider       String   @default("")
+  aiApiKey         String   @default("")
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
@@ -144,8 +146,27 @@ model Profile {
   medications       Medication[]
   medicineReminders MedicineReminder[]
   illnesses         IllnessEntry[]
+  labResults        LabResult[]
   user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   vitals            VitalEntry[]
+}
+
+model LabResult {
+  id             String    @id @default(cuid())
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  profileId      String
+  testName       String
+  value          String
+  unit           String?
+  referenceRange String?
+  status         String    @default("UNKNOWN")
+  collectedAt    DateTime?
+  labName        String?
+  notes          String?
+  profile        Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, collectedAt])
 }
 
 model MedicalRecord {
