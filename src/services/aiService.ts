@@ -498,3 +498,272 @@ Return the JSON object.`
 
   throw new Error(`Unsupported AI provider: ${provider}`)
 }
+
+// ─── Logbook Insights ─────────────────────────────────────────────────────────
+
+export interface LogbookPropertyMonth {
+  year: number
+  month: number
+  rent: number
+  expense: number
+  entries: number
+}
+
+export interface LogbookInsightInput {
+  properties: Array<{
+    name: string
+    monthly: LogbookPropertyMonth[]
+    totalRent: number
+    totalExpense: number
+  }>
+  dateRange: { from: string; to: string }
+}
+
+export interface LogbookInsightResult {
+  summary: string
+  propertyInsights: Array<{
+    property: string
+    observation: string
+    trend: 'UP' | 'DOWN' | 'STABLE'
+    monthlyAvgRent: number
+    monthlyAvgExpense: number
+  }>
+  alerts: Array<{ severity: 'HIGH' | 'MEDIUM' | 'LOW'; message: string }>
+  recommendations: string[]
+}
+
+const LOGBOOK_INSIGHTS_PROMPT = `You are a rental property financial analyst. Analyze the provided payment records and return a structured JSON response only — no markdown, no prose outside JSON.
+
+Return exactly this JSON shape:
+{
+  "summary": "2-3 sentence overall financial status across all properties",
+  "propertyInsights": [
+    { "property": "property name", "observation": "one-line key observation", "trend": "UP|DOWN|STABLE", "monthlyAvgRent": 0.00, "monthlyAvgExpense": 0.00 }
+  ],
+  "alerts": [
+    { "severity": "HIGH|MEDIUM|LOW", "message": "alert message" }
+  ],
+  "recommendations": ["actionable item 1", "...up to 5"]
+}
+
+Rules:
+- trend is based on recent months vs earlier months; STABLE if data is insufficient
+- Keep all text concise and plain — no markdown inside JSON strings
+- This is personal property tracking only`
+
+export async function generateLogbookInsights(
+  provider: string,
+  apiKey: string,
+  data: LogbookInsightInput
+): Promise<LogbookInsightResult> {
+  const userMessage = `Analyze rental property payment data from ${data.dateRange.from} to ${data.dateRange.to} and return your JSON response.
+
+PROPERTIES:
+${JSON.stringify(data.properties, null, 2)}`
+
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey })
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: [{ type: 'text', text: LOGBOOK_INSIGHTS_PROMPT, cache_control: { type: 'ephemeral' } }] as any,
+      messages: [{ role: 'user', content: userMessage }]
+    })
+    const block = response.content.find(b => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('No text response from Anthropic')
+    return parseResult<LogbookInsightResult>(block.text)
+  }
+
+  if (provider === 'openai') {
+    const client = new OpenAI({ apiKey })
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: LOGBOOK_INSIGHTS_PROMPT },
+        { role: 'user', content: userMessage }
+      ]
+    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error('No response from OpenAI')
+    return parseResult<LogbookInsightResult>(text)
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}
+
+// ─── Logbook Audit ────────────────────────────────────────────────────────────
+
+export interface LogbookAuditEntry {
+  date: string
+  mainCategory: string
+  subCategory: string
+  amount: number
+  description: string | null
+}
+
+export interface LogbookMonthlySummary {
+  year: number
+  month: number
+  income: number
+  expenses: number
+  netFlow: number
+  entryCount: number
+  categories: Record<string, number>
+}
+
+export interface LogbookAuditInput {
+  group: string
+  entries: LogbookAuditEntry[]
+  monthlySummary: LogbookMonthlySummary[]
+  totalIncome: number
+  totalExpenses: number
+  netBalance: number
+  dateRange: { from: string; to: string }
+  dataQuality: {
+    missingDescription: number
+    missingSubCategory: number
+    totalEntries: number
+  }
+}
+
+export interface LogbookAuditIssue {
+  severity: 'HIGH' | 'MEDIUM' | 'LOW'
+  type: 'DUPLICATE' | 'MISSING_RENT' | 'UNUSUAL_AMOUNT' | 'DATA_GAP' |
+        'CASH_FLOW_NEGATIVE' | 'CATEGORY_SPIKE' | 'DORMANT_PROPERTY' |
+        'DATA_QUALITY' | 'EXPENSE_RATIO' | 'ROUND_NUMBER' | 'OTHER'
+  message: string
+  date?: string
+  affectedCategory?: string
+}
+
+export interface LogbookAuditResult {
+  summary: string
+  issues: LogbookAuditIssue[]
+  totalEntries: number
+  issuesFound: number
+  healthScore: number
+  cashFlowSummary: {
+    totalIncome: number
+    totalExpenses: number
+    netBalance: number
+    trend: 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL'
+    consecutiveNegativeMonths: number
+  }
+  topCategories: { category: string; amount: number; percentage: number }[]
+  dataQualityScore: number
+  recommendations: string[]
+}
+
+const LOGBOOK_AUDIT_PROMPT = `You are a financial auditor for rental property payment records. Analyze the provided data and return a comprehensive audit report as structured JSON only — no markdown, no prose outside JSON.
+
+Return exactly this JSON shape:
+{
+  "summary": "2-3 sentence overview of findings and overall health",
+  "issues": [
+    {
+      "severity": "HIGH|MEDIUM|LOW",
+      "type": "DUPLICATE|MISSING_RENT|UNUSUAL_AMOUNT|DATA_GAP|CASH_FLOW_NEGATIVE|CATEGORY_SPIKE|DORMANT_PROPERTY|DATA_QUALITY|EXPENSE_RATIO|ROUND_NUMBER|OTHER",
+      "message": "specific, actionable description of the issue",
+      "date": "YYYY-MM or YYYY-MM-DD (optional)",
+      "affectedCategory": "category name if applicable (optional)"
+    }
+  ],
+  "totalEntries": 0,
+  "issuesFound": 0,
+  "healthScore": 0,
+  "cashFlowSummary": {
+    "totalIncome": 0,
+    "totalExpenses": 0,
+    "netBalance": 0,
+    "trend": "POSITIVE|NEGATIVE|NEUTRAL",
+    "consecutiveNegativeMonths": 0
+  },
+  "topCategories": [
+    { "category": "name", "amount": 0, "percentage": 0 }
+  ],
+  "dataQualityScore": 0,
+  "recommendations": ["actionable recommendation 1", "actionable recommendation 2"]
+}
+
+Issue type rules:
+- DUPLICATE: two entries with same date and same or nearly identical amount
+- MISSING_RENT: a month that historically has rental payments but has none recorded
+- UNUSUAL_AMOUNT: an amount that is a significant statistical outlier (>2x or <0.5x typical range for that category)
+- DATA_GAP: 45+ days with zero entries when the period was otherwise active
+- CASH_FLOW_NEGATIVE: two or more consecutive months where expenses exceed income
+- CATEGORY_SPIKE: a category's total in a month is 3x+ its typical monthly amount
+- DORMANT_PROPERTY: a property/category that had regular entries but nothing for 60+ days
+- DATA_QUALITY: 20%+ of entries are missing descriptions or subcategories
+- EXPENSE_RATIO: repair/expense costs exceed 40% of rental income in a period
+- ROUND_NUMBER: multiple entries with perfectly round amounts (e.g. 5000, 10000) — may indicate estimates
+- OTHER: anything that doesn't fit above but warrants attention
+
+Scoring rules:
+- healthScore 0-100: start at 100, deduct 15 per HIGH issue, 8 per MEDIUM, 3 per LOW, min 0
+- dataQualityScore 0-100: based on completeness of descriptions and subcategories
+- trend: POSITIVE if last 3 months net flow is improving, NEGATIVE if declining, NEUTRAL otherwise
+- topCategories: top 5 by total amount, percentages should sum to 100 across all categories shown
+- recommendations: 2-4 specific, actionable items the user should act on
+- Keep all text concise and plain — no markdown inside JSON strings`
+
+export async function analyzeLogbookHistory(
+  provider: string,
+  apiKey: string,
+  data: LogbookAuditInput
+): Promise<LogbookAuditResult> {
+  const sampleEntries = data.entries.length > 300
+    ? [...data.entries.slice(0, 150), ...data.entries.slice(-150)]
+    : data.entries
+
+  const userMessage = `Audit payment records for group "${data.group}".
+
+DATE RANGE: ${data.dateRange.from} to ${data.dateRange.to}
+TOTAL ENTRIES: ${data.entries.length} (${sampleEntries.length} shown if truncated)
+TOTAL INCOME: ${data.totalIncome.toFixed(2)}
+TOTAL EXPENSES: ${data.totalExpenses.toFixed(2)}
+NET BALANCE: ${data.netBalance.toFixed(2)}
+DATA QUALITY: ${data.dataQuality.missingDescription} entries missing description, ${data.dataQuality.missingSubCategory} missing subcategory (of ${data.dataQuality.totalEntries} total)
+
+MONTHLY SUMMARY (income / expenses / net / count):
+${data.monthlySummary.map(m => `${m.year}-${String(m.month).padStart(2,'0')}: income=${m.income.toFixed(2)} expenses=${m.expenses.toFixed(2)} net=${m.netFlow.toFixed(2)} entries=${m.entryCount}`).join('\n')}
+
+CATEGORY TOTALS PER MONTH:
+${data.monthlySummary.map(m => `${m.year}-${String(m.month).padStart(2,'0')}: ${Object.entries(m.categories).map(([k,v]) => `${k}=${(v as number).toFixed(2)}`).join(', ')}`).join('\n')}
+
+RAW ENTRIES (date | mainCategory | subCategory | amount | description):
+${sampleEntries.map(e => `${e.date} | ${e.mainCategory} | ${e.subCategory} | ${e.amount} | ${e.description || ''}`).join('\n')}
+
+Return your JSON audit response.`
+
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey })
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      system: [{ type: 'text', text: LOGBOOK_AUDIT_PROMPT, cache_control: { type: 'ephemeral' } }] as any,
+      messages: [{ role: 'user', content: userMessage }]
+    })
+    const block = response.content.find(b => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('No text response from Anthropic')
+    return parseResult<LogbookAuditResult>(block.text)
+  }
+
+  if (provider === 'openai') {
+    const client = new OpenAI({ apiKey })
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      max_tokens: 2048,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: LOGBOOK_AUDIT_PROMPT },
+        { role: 'user', content: userMessage }
+      ]
+    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error('No response from OpenAI')
+    return parseResult<LogbookAuditResult>(text)
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}

@@ -1,6 +1,6 @@
 import { Request, Response } from 'express'
 import prisma from '../../lib/prisma'
-import { generateHealthInsights, extractPrescription, extractLabReport, generateSpendingInsights, HealthInsightInput, SpendingInsightInput } from '../services/aiService'
+import { generateHealthInsights, extractPrescription, extractLabReport, generateSpendingInsights, generateLogbookInsights, analyzeLogbookHistory, HealthInsightInput, SpendingInsightInput, LogbookInsightInput, LogbookAuditInput, LogbookMonthlySummary } from '../services/aiService'
 
 function ensureUser(req: Request, res: Response): any {
     const user = (req as any).user
@@ -288,5 +288,222 @@ export const extractLabReportHandler = async (req: Request, res: Response) => {
             status: isKeyError ? 401 : 500,
             message: isKeyError ? 'Invalid API key. Check your AI settings.' : message
         })
+    }
+}
+
+const normalize = (value: unknown) => String(value || '').trim().toLowerCase()
+
+const isRental = (item: { subCategory?: string | null }) =>
+    normalize(item.subCategory) === 'rental'
+
+const isGroupA = (item: { mainCategory?: string | null; subCategory?: string | null }) => {
+    const main = normalize(item.mainCategory)
+    const sub = normalize(item.subCategory)
+    return main === 'mama expense' || sub.startsWith('mama') || main === 'yellow fantasy' || main === 'parking'
+}
+
+const isGroupB = (item: { mainCategory?: string | null; subCategory?: string | null }) => {
+    const main = normalize(item.mainCategory)
+    const sub = normalize(item.subCategory)
+    return main === 'rc expense' || sub.startsWith('rc') || main === 'fuji' || main === 'fuji view'
+}
+
+const isExpenseEntry = (item: { mainCategory?: string | null; subCategory?: string | null }) => {
+    const main = normalize(item.mainCategory)
+    const sub = normalize(item.subCategory)
+    if (main === 'mama expense' || main === 'rc expense' || main === 'bank deposit') return true
+    if (main.includes('expense')) return true
+    if (sub.includes('cash-out') || sub.includes('refund') || sub.includes('repair') || sub.includes('labor') || sub.includes('permit')) return true
+    return false
+}
+
+const handleAiError = (res: Response, error: unknown) => {
+    const message = (error as any)?.message || 'AI service error'
+    const isKeyError = message.toLowerCase().includes('api key') ||
+        message.toLowerCase().includes('authentication') ||
+        message.toLowerCase().includes('unauthorized') ||
+        message.toLowerCase().includes('invalid')
+    return res.status(isKeyError ? 401 : 500).json({
+        status: isKeyError ? 401 : 500,
+        message: isKeyError ? 'Invalid API key. Check your AI settings.' : message
+    })
+}
+
+export const getLogbookInsights = async (req: Request, res: Response) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const prefs = await prisma.userPreference.findUnique({ where: { userId: user.id } })
+    const aiProvider = prefs?.aiProvider || ''
+    const aiApiKey = prefs?.aiApiKey || ''
+
+    if (!aiProvider || !aiApiKey) {
+        return res.status(422).json({ status: 422, message: 'AI provider not configured. Go to Settings and add your API key.' })
+    }
+
+    const fromParam = req.query.from as string | undefined
+    const toParam = req.query.to as string | undefined
+
+    const fromDate = fromParam ? new Date(fromParam + 'T00:00:00') : undefined
+    const toDate = toParam ? new Date(toParam + 'T23:59:59') : undefined
+
+    const dateFilter = (fromDate || toDate)
+        ? { paymentDate: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } }
+        : {}
+
+    const payments = await prisma.logbookPayment.findMany({
+        where: { userId: user.id, ...dateFilter },
+        orderBy: [{ paymentDate: 'asc' }]
+    })
+
+    if (!payments.length) {
+        return res.status(422).json({ status: 422, message: 'No payment data found for the selected date range.' })
+    }
+
+    const propertyCategories = [
+        { name: 'Yellow Fantasy', matcher: (p: typeof payments[0]) => normalize(p.mainCategory) === 'yellow fantasy' },
+        { name: 'Fuji View', matcher: (p: typeof payments[0]) => normalize(p.mainCategory) === 'fuji view' || normalize(p.mainCategory) === 'fuji' },
+        { name: 'Parking', matcher: (p: typeof payments[0]) => normalize(p.mainCategory) === 'parking' },
+    ]
+
+    const properties = propertyCategories.map(({ name, matcher }) => {
+        const items = payments.filter(matcher)
+        const monthlyMap = new Map<string, { rent: number; expense: number; entries: number }>()
+
+        items.forEach(p => {
+            const d = new Date(p.paymentDate)
+            const key = `${d.getFullYear()}-${d.getMonth()}`
+            const slot = monthlyMap.get(key) || { rent: 0, expense: 0, entries: 0 }
+            if (isRental(p)) slot.rent += Number(p.amount || 0)
+            else slot.expense += Number(p.amount || 0)
+            slot.entries += 1
+            monthlyMap.set(key, slot)
+        })
+
+        const monthly = Array.from(monthlyMap.entries()).map(([key, v]) => {
+            const [year, month] = key.split('-').map(Number)
+            return { year, month: month + 1, ...v }
+        }).sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+
+        const totalRent = items.filter(isRental).reduce((s, p) => s + Number(p.amount || 0), 0)
+        const totalExpense = items.filter(p => !isRental(p)).reduce((s, p) => s + Number(p.amount || 0), 0)
+
+        return { name, monthly, totalRent, totalExpense }
+    }).filter(p => p.monthly.length > 0)
+
+    const dates = payments.map(p => p.paymentDate.getTime())
+    const from = new Date(Math.min(...dates)).toISOString().slice(0, 7)
+    const to = new Date(Math.max(...dates)).toISOString().slice(0, 7)
+
+    const data: LogbookInsightInput = { properties, dateRange: { from, to } }
+
+    try {
+        const insights = await generateLogbookInsights(aiProvider, aiApiKey, data)
+        return res.status(200).json({ status: 200, insights })
+    } catch (error) {
+        return handleAiError(res, error)
+    }
+}
+
+export const getLogbookAudit = async (req: Request, res: Response) => {
+    const user = ensureUser(req, res)
+    if (!user) return
+
+    const group = (req.query.group as string) || 'A'
+    const fromParam = req.query.from as string | undefined
+    const toParam = req.query.to as string | undefined
+
+    const fromDate = fromParam ? new Date(fromParam + 'T00:00:00') : undefined
+    const toDate = toParam ? new Date(toParam + 'T23:59:59') : undefined
+
+    const prefs = await prisma.userPreference.findUnique({ where: { userId: user.id } })
+    const aiProvider = prefs?.aiProvider || ''
+    const aiApiKey = prefs?.aiApiKey || ''
+
+    if (!aiProvider || !aiApiKey) {
+        return res.status(422).json({ status: 422, message: 'AI provider not configured. Go to Settings and add your API key.' })
+    }
+
+    const dateFilter = (fromDate || toDate)
+        ? { paymentDate: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } }
+        : {}
+
+    const allPayments = await prisma.logbookPayment.findMany({
+        where: { userId: user.id, ...dateFilter },
+        orderBy: [{ paymentDate: 'asc' }]
+    })
+
+    const filtered = allPayments.filter(group === 'B' ? isGroupB : isGroupA)
+
+    if (!filtered.length) {
+        return res.status(422).json({ status: 422, message: 'No entries found for this group in the selected date range.' })
+    }
+
+    const groupLabel = group === 'B' ? 'RC / Fuji View' : 'Mama / Yellow Fantasy / Parking'
+
+    // Build monthly summaries and quality stats
+    const monthlyMap = new Map<string, LogbookMonthlySummary>()
+    let totalIncome = 0
+    let totalExpenses = 0
+    let missingDescription = 0
+    let missingSubCategory = 0
+
+    for (const p of filtered) {
+        const d = new Date(p.paymentDate)
+        const year = d.getFullYear()
+        const month = d.getMonth() + 1
+        const key = `${year}-${String(month).padStart(2, '0')}`
+        const slot = monthlyMap.get(key) || { year, month, income: 0, expenses: 0, netFlow: 0, entryCount: 0, categories: {} }
+        const amount = Number(p.amount || 0)
+        const cat = p.mainCategory || 'Unknown'
+        if (isExpenseEntry(p)) {
+            slot.expenses += amount
+            totalExpenses += amount
+        } else {
+            slot.income += amount
+            totalIncome += amount
+        }
+        slot.entryCount += 1
+        slot.categories[cat] = (slot.categories[cat] || 0) + amount
+        monthlyMap.set(key, slot)
+        if (!p.description) missingDescription++
+        if (!p.subCategory) missingSubCategory++
+    }
+
+    const monthlySummary = Array.from(monthlyMap.values())
+        .map(s => ({ ...s, netFlow: s.income - s.expenses }))
+        .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+
+    const sortedFiltered = [...filtered].sort((a, b) => a.paymentDate.getTime() - b.paymentDate.getTime())
+
+    const data: LogbookAuditInput = {
+        group: groupLabel,
+        entries: sortedFiltered.map(p => ({
+            date: p.paymentDate.toISOString().slice(0, 10),
+            mainCategory: p.mainCategory || '',
+            subCategory: p.subCategory || '',
+            amount: Number(p.amount || 0),
+            description: p.description
+        })),
+        monthlySummary,
+        totalIncome,
+        totalExpenses,
+        netBalance: totalIncome - totalExpenses,
+        dateRange: {
+            from: sortedFiltered[0].paymentDate.toISOString().slice(0, 10),
+            to: sortedFiltered[sortedFiltered.length - 1].paymentDate.toISOString().slice(0, 10)
+        },
+        dataQuality: {
+            missingDescription,
+            missingSubCategory,
+            totalEntries: filtered.length
+        }
+    }
+
+    try {
+        const audit = await analyzeLogbookHistory(aiProvider, aiApiKey, data)
+        return res.status(200).json({ status: 200, audit })
+    } catch (error) {
+        return handleAiError(res, error)
     }
 }
