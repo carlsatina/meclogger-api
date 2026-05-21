@@ -62,7 +62,7 @@ function authenticateUser (req:any, res:any , next: any) {
 
     jwt.verify(token, process.env.ACCESS_TOKEN_SECRET || 'defaultSecret', (err: any, user: any) => {
         if (err) return res.status(403)
-        req.user = user
+        req.user = { ...user, id: String(user.id) }
         next()
     })
 }
