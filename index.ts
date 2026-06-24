@@ -47,6 +47,7 @@ app.use('/logo', express.static("./uploaded-images/logo"))
 app.use('/portfolio', express.static("./uploaded-images/portfolio"))
 app.use('/records', express.static("./uploaded-images/records"))
 app.use('/vehicles', express.static("./uploaded-images/vehicles"))
+app.use('/maintenance', express.static("./uploaded-images/maintenance"))
 
 app.get('/', (req, res) => {
     res.send("Hello World!")

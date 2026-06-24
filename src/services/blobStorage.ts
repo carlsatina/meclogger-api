@@ -34,9 +34,12 @@ const sanitizeFileName = (name: string) => {
 
 const getExtFromMime = (mime: string) => imageMimeMap[mime] || 'bin'
 
-const processImageIfNeeded = async(file: Express.Multer.File): Promise<ProcessedFile> => {
+const processImageIfNeeded = async(
+    file: Express.Multer.File,
+    targetBytes: number = MAX_IMAGE_BYTES
+): Promise<ProcessedFile> => {
     const isImage = Boolean(imageMimeMap[file.mimetype])
-    if (!isImage || file.size <= MAX_IMAGE_BYTES) {
+    if (!isImage || file.size <= targetBytes) {
         return {
             buffer: file.buffer,
             mimeType: file.mimetype,
@@ -47,28 +50,32 @@ const processImageIfNeeded = async(file: Express.Multer.File): Promise<Processed
 
     try {
         const sharp = (await import('sharp')).default
-        const maxDimension = 1800
-        const qualities = [80, 65, 50]
-        let output: Buffer | null = null
+        // Step down both dimension and quality until we land under the target.
+        // Smaller targets (e.g. 200KB) just iterate further; the first candidate
+        // that fits is returned, so most images settle quickly.
+        const dimensions = [1800, 1440, 1080, 800]
+        const qualities = [82, 70, 58, 46, 36]
+        let smallest: Buffer | null = null
 
-        for (const quality of qualities) {
-            const candidate = await sharp(file.buffer)
-                .rotate()
-                .resize({ width: maxDimension, height: maxDimension, fit: 'inside' })
-                .webp({ quality })
-                .toBuffer()
-            output = candidate
-            if (candidate.byteLength <= MAX_IMAGE_BYTES) break
+        for (const dimension of dimensions) {
+            for (const quality of qualities) {
+                const candidate = await sharp(file.buffer)
+                    .rotate()
+                    .resize({ width: dimension, height: dimension, fit: 'inside', withoutEnlargement: true })
+                    .webp({ quality })
+                    .toBuffer()
+                if (!smallest || candidate.byteLength < smallest.byteLength) smallest = candidate
+                if (candidate.byteLength <= targetBytes) {
+                    return { buffer: candidate, mimeType: 'image/webp', extension: 'webp', originalName: file.originalname }
+                }
+            }
         }
 
-        if (!output) {
-            output = file.buffer
-        }
-
+        // Couldn't hit the target — use the smallest result we produced.
         return {
-            buffer: output,
-            mimeType: 'image/webp',
-            extension: 'webp',
+            buffer: smallest || file.buffer,
+            mimeType: smallest ? 'image/webp' : file.mimetype,
+            extension: smallest ? 'webp' : getExtFromMime(file.mimetype),
             originalName: file.originalname
         }
     } catch (e) {
@@ -128,11 +135,22 @@ const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<U
         throw new Error('Missing MinIO configuration')
     }
 
-    const useSSL = String(process.env.MINIO_USE_SSL || '').toLowerCase() === 'true'
-    const port = process.env.MINIO_PORT ? Number(process.env.MINIO_PORT) : (useSSL ? 443 : 80)
+    // MINIO_ENDPOINT may be a bare host ("minio.example.com") or a full URL
+    // ("http://minio.example.com"). The MinIO client only accepts a bare host,
+    // so parse out the scheme/port when a URL is provided.
+    let host = endpoint
+    let useSSL = String(process.env.MINIO_USE_SSL || '').toLowerCase() === 'true'
+    let port = process.env.MINIO_PORT ? Number(process.env.MINIO_PORT) : undefined
+    if (/^https?:\/\//i.test(endpoint)) {
+        const parsed = new URL(endpoint)
+        host = parsed.hostname
+        useSSL = parsed.protocol === 'https:'
+        if (!port && parsed.port) port = Number(parsed.port)
+    }
+    const resolvedPort = port ?? (useSSL ? 443 : 80)
     const client = new MinioClient({
-        endPoint: endpoint,
-        port,
+        endPoint: host,
+        port: resolvedPort,
         accessKey,
         secretKey,
         useSSL
@@ -147,7 +165,9 @@ const uploadToMinio = async(processed: ProcessedFile, folder: string): Promise<U
     })
 
     const publicBase = process.env.MINIO_PUBLIC_URL
-        || `${useSSL ? 'https' : 'http'}://${endpoint}${process.env.MINIO_PORT ? `:${port}` : ''}`
+        || (/^https?:\/\//i.test(endpoint)
+            ? endpoint.replace(/\/+$/, '')
+            : `${useSSL ? 'https' : 'http'}://${host}${process.env.MINIO_PORT ? `:${resolvedPort}` : ''}`)
     const url = `${publicBase}/${bucket}/${objectName}`
 
     return {
@@ -220,9 +240,22 @@ const uploadToVercelBlob = async(file: Express.Multer.File, folder: string, toke
     return result
 }
 
+// Guard remote provider calls so a stalled connection (e.g. an unreachable
+// MinIO/S3 endpoint behind a proxy) falls back to local storage instead of
+// hanging the request indefinitely.
+const UPLOAD_TIMEOUT_MS = Number(process.env.UPLOAD_TIMEOUT_MS) || 15000
+const withTimeout = <T>(promise: Promise<T>, label: string): Promise<T> =>
+    Promise.race([
+        promise,
+        new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`${label} upload timed out after ${UPLOAD_TIMEOUT_MS}ms`)), UPLOAD_TIMEOUT_MS)
+        )
+    ])
+
 export const uploadImageToStorage = async(
     file: Express.Multer.File,
-    folder: string = 'vehicles'
+    folder: string = 'vehicles',
+    options: { targetBytes?: number } = {}
 ): Promise<UploadResult> => {
     const token = process.env.BLOB_READ_WRITE_TOKEN || process.env.VERCEL_BLOB_READ_WRITE_TOKEN
 
@@ -230,11 +263,11 @@ export const uploadImageToStorage = async(
         throw new Error('Invalid file upload payload')
     }
 
-    const processed = await processImageIfNeeded(file)
+    const processed = await processImageIfNeeded(file, options.targetBytes)
 
     if (token) {
         try {
-            return await uploadToVercelBlob(file, folder, token, processed)
+            return await withTimeout(uploadToVercelBlob(file, folder, token, processed), 'Vercel Blob')
         } catch (error) {
             console.warn('Vercel Blob upload failed, falling back to other providers', error)
         }
@@ -242,7 +275,7 @@ export const uploadImageToStorage = async(
 
     if (hasR2Config()) {
         try {
-            return await uploadToR2(processed, folder)
+            return await withTimeout(uploadToR2(processed, folder), 'R2')
         } catch (err) {
             console.warn('R2 upload failed, falling back to other providers', err)
         }
@@ -250,7 +283,7 @@ export const uploadImageToStorage = async(
 
     if (hasMinioConfig()) {
         try {
-            return await uploadToMinio(processed, folder)
+            return await withTimeout(uploadToMinio(processed, folder), 'MinIO')
         } catch (err) {
             console.warn('MinIO upload failed, falling back to local storage', err)
         }

@@ -368,6 +368,7 @@ model MaintenanceRecord {
   partsUsed          String?
   laborHours         Float?
   receiptUrl         String?
+  photos             String[]        @default([])
   tags               String[]        @default([])
   nextServiceDue     DateTime?
   nextServiceMileage Int?

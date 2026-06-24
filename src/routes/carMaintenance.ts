@@ -2,6 +2,7 @@ import { RequestHandler, Router } from 'express'
 import { PrismaClient } from '@prisma/client'
 import { addVehicle, addMaintenanceRecord, listVehicles, listMaintenanceRecords, getVehicle, updateVehicle, deleteVehicle, getMaintenanceRecord, deleteMaintenanceRecord, addReminder, listReminders, updateReminder, getReminder, deleteReminder, getPreferences, savePreferences, updateMaintenanceRecord } from '../controller/carMaintenanceController'
 import uploadVehicleImage from '../middlewares/uploadVehicleImage'
+import uploadMaintenancePhoto from '../middlewares/uploadMaintenancePhoto'
 
 const makeCarMaintenanceRouter = (
     _dbClient: PrismaClient,
@@ -15,8 +16,8 @@ const makeCarMaintenanceRouter = (
     router.put('/vehicles/:id', authenticateUser, uploadVehicleImage.single('image'), updateVehicle)
     router.delete('/vehicles/:id', authenticateUser, deleteVehicle)
     router.get('/maintenance-records', authenticateUser, listMaintenanceRecords)
-    router.post('/maintenance-records', authenticateUser, addMaintenanceRecord)
-    router.put('/maintenance-records/:id', authenticateUser, updateMaintenanceRecord)
+    router.post('/maintenance-records', authenticateUser, uploadMaintenancePhoto.array('photos', 6), addMaintenanceRecord)
+    router.put('/maintenance-records/:id', authenticateUser, uploadMaintenancePhoto.array('photos', 6), updateMaintenanceRecord)
     router.get('/maintenance-records/:id', authenticateUser, getMaintenanceRecord)
     router.delete('/maintenance-records/:id', authenticateUser, deleteMaintenanceRecord)
     router.get('/preferences', authenticateUser, getPreferences)

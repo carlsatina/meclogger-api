@@ -45,7 +45,7 @@ export const addVehicle = async(req: Request, res: Response) => {
 
     if (uploadedImage) {
         try {
-            const upload = await uploadImageToStorage(uploadedImage, 'vehicles')
+            const upload = await uploadImageToStorage(uploadedImage, 'vehicles', { targetBytes: 200 * 1024 })
             resolvedImageUrl = upload.url
         } catch (error: any) {
             const message = error?.message || 'Unable to upload vehicle image'
@@ -105,6 +105,7 @@ export const updateMaintenanceRecord = async(req: Request, res: Response) => {
         partsUsed,
         laborHours,
         receiptUrl,
+        keepPhotos,
         tags,
         nextServiceDue,
         nextServiceMileage
@@ -122,6 +123,32 @@ export const updateMaintenanceRecord = async(req: Request, res: Response) => {
             const str = String(raw).trim()
             return str || existing.maintenanceType
         }
+
+        // Photos the client chose to keep. With multipart this arrives as a JSON string;
+        // as plain JSON it's already an array. If omitted, fall back to the existing set
+        // (back-compat: seed from legacy receiptUrl when the array is empty).
+        let keptPhotos: string[]
+        if (keepPhotos === undefined) {
+            keptPhotos = existing.photos?.length ? existing.photos : (existing.receiptUrl ? [existing.receiptUrl] : [])
+        } else if (Array.isArray(keepPhotos)) {
+            keptPhotos = keepPhotos
+        } else {
+            try { keptPhotos = JSON.parse(keepPhotos) } catch { keptPhotos = [] }
+            if (!Array.isArray(keptPhotos)) keptPhotos = []
+        }
+
+        const uploadedPhotos = ((req as any).files as Express.Multer.File[] | undefined) || []
+        let newUrls: string[] = []
+        try {
+            const uploads = await Promise.all(uploadedPhotos.map(file => uploadImageToStorage(file, 'maintenance', { targetBytes: 200 * 1024 })))
+            newUrls = uploads.map(u => u.url)
+        } catch (error: any) {
+            return res.status(500).json({ status: 500, message: error?.message || 'Unable to upload photo' })
+        }
+
+        const finalPhotos = [...keptPhotos, ...newUrls]
+        const resolvedReceiptUrl = finalPhotos[0] || receiptUrl || null
+
         const record = await prisma.maintenanceRecord.update({
             where: { id },
             data: {
@@ -137,7 +164,8 @@ export const updateMaintenanceRecord = async(req: Request, res: Response) => {
                 currency: currency || existing.currency,
                 partsUsed: partsUsed ?? existing.partsUsed,
                 laborHours: laborHours !== undefined ? Number(laborHours) : existing.laborHours,
-                receiptUrl: receiptUrl ?? existing.receiptUrl,
+                receiptUrl: resolvedReceiptUrl,
+                photos: finalPhotos,
                 tags: Array.isArray(tags) ? tags : existing.tags,
                 nextServiceDue: nextServiceDue ? new Date(nextServiceDue) : existing.nextServiceDue,
                 nextServiceMileage: nextServiceMileage !== undefined ? Number(nextServiceMileage) : existing.nextServiceMileage
@@ -214,7 +242,7 @@ export const updateVehicle = async(req: Request, res: Response) => {
         let resolvedImageUrl = imageUrl || existing.imageUrl || null
 
         if (uploadedImage) {
-            const upload = await uploadImageToStorage(uploadedImage, 'vehicles')
+            const upload = await uploadImageToStorage(uploadedImage, 'vehicles', { targetBytes: 200 * 1024 })
             resolvedImageUrl = upload.url
         }
 
@@ -389,6 +417,17 @@ export const addMaintenanceRecord = async(req: Request, res: Response) => {
         return str || 'OTHER'
     }
 
+    const uploadedPhotos = ((req as any).files as Express.Multer.File[] | undefined) || []
+    let photoUrls: string[] = []
+    try {
+        const uploads = await Promise.all(uploadedPhotos.map(file => uploadImageToStorage(file, 'maintenance', { targetBytes: 200 * 1024 })))
+        photoUrls = uploads.map(u => u.url)
+    } catch (error: any) {
+        return res.status(500).json({ status: 500, message: error?.message || 'Unable to upload photo' })
+    }
+    // keep receiptUrl pointing at the first photo for thumbnails/back-compat
+    const resolvedReceiptUrl = photoUrls[0] || receiptUrl || null
+
     try {
         const record = await prisma.maintenanceRecord.create({
             data: {
@@ -404,7 +443,8 @@ export const addMaintenanceRecord = async(req: Request, res: Response) => {
                 currency: currency || 'USD',
                 partsUsed: partsUsed || null,
                 laborHours: laborHours ? Number(laborHours) : null,
-                receiptUrl: receiptUrl || null,
+                receiptUrl: resolvedReceiptUrl,
+                photos: photoUrls,
                 tags: Array.isArray(tags) ? tags : []
             }
         })
