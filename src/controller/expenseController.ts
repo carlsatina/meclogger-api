@@ -1225,7 +1225,7 @@ export const quickAddExpense = async (req: ExtendedRequest, res: Response) => {
         prisma.expenseCategory.findMany({ where: { userId: user.id }, select: { id: true, name: true } }),
         prisma.budget.findMany({
             where: { userId: user.id, active: true, startDate: { lte: today }, endDate: { gte: today } },
-            select: { id: true, name: true, categoryId: true }
+            select: { id: true, name: true, categoryId: true, category: { select: { name: true } } }
         }),
         prisma.userPreference.findUnique({ where: { userId: user.id } })
     ])
@@ -1237,7 +1237,13 @@ export const quickAddExpense = async (req: ExtendedRequest, res: Response) => {
 
     if (aiProvider && aiApiKey) {
         try {
-            parsed = await parseQuickExpense(aiProvider, aiApiKey, text.trim(), categories, budgets)
+            const budgetsForAi = budgets.map(b => ({
+                id: b.id,
+                name: b.name,
+                categoryId: b.categoryId,
+                categoryName: b.category?.name ?? null
+            }))
+            parsed = await parseQuickExpense(aiProvider, aiApiKey, text.trim(), categories, budgetsForAi)
         } catch {
             const fb = fallbackParse(text.trim())
             parsed = { ...fb, categoryId: null, budgetId: null, notes: null }

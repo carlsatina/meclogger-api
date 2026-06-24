@@ -449,8 +449,9 @@ Return exactly this shape:
 Rules:
 - amount must be a positive number (no currency symbol)
 - Match categoryId to the most fitting category name based on the merchant/description
-- Match budgetId to the most fitting active budget — prefer budgets whose categoryId matches the chosen category; if no category match exists, pick the most general active budget; if nothing fits, return null
+- Match budgetId to a budget whose categoryName matches the chosen category, or whose name clearly fits the expense
 - If the user explicitly names a budget, prefer that
+- If no budget clearly fits, return null for budgetId — do NOT guess or fall back to a default budget
 - title should be clean and concise — capitalise properly (e.g. "Myjoy" not "myjoy")
 - Return null for any field you cannot confidently fill`
 
@@ -459,7 +460,7 @@ export async function parseQuickExpense(
   apiKey: string,
   text: string,
   categories: Array<{ id: string; name: string }>,
-  budgets: Array<{ id: string; name: string; categoryId: string | null }>
+  budgets: Array<{ id: string; name: string; categoryId: string | null; categoryName?: string | null }>
 ): Promise<QuickExpenseParse> {
   const userMessage = `Parse this expense entry: "${text}"
 
