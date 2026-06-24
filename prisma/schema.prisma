@@ -508,6 +508,7 @@ model Budget {
   currency       String           @default("USD")
   startDate      DateTime
   endDate        DateTime
+  period         BudgetPeriod     @default(ONE_TIME)
   categoryId     String?
   alertThreshold Float?
   alertEnabled   Boolean          @default(true)
@@ -724,5 +725,12 @@ enum ExpenseFrequency {
   WEEKLY
   MONTHLY
   QUARTERLY
+  YEARLY
+}
+
+enum BudgetPeriod {
+  ONE_TIME
+  WEEKLY
+  MONTHLY
   YEARLY
 }

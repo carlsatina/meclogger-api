@@ -277,6 +277,34 @@ export const deleteExpense = async(req: ExtendedRequest, res: Response) => {
     res.status(200).json({ status: 200, message: 'Expense deleted' })
 }
 
+const BUDGET_PERIODS = ['ONE_TIME', 'WEEKLY', 'MONTHLY', 'YEARLY']
+// recurring budgets have no real end; store a sentinel far-future date so "active now" queries pass
+const RECURRING_FAR_FUTURE = new Date('2999-12-31T23:59:59.999Z')
+
+// Resolve the active window for a budget. ONE_TIME uses its fixed [startDate, endDate];
+// recurring budgets use the current calendar period (week/month/year), clamped so it
+// never counts expenses recorded before the budget began.
+const currentBudgetWindow = (budget: { period: string; startDate: Date; endDate: Date }, now = new Date()) => {
+    let start: Date
+    let end: Date
+    if (budget.period === 'WEEKLY') {
+        const diffToMonday = (now.getDay() + 6) % 7 // Monday-based week
+        start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - diffToMonday)
+        end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6, 23, 59, 59, 999)
+    } else if (budget.period === 'MONTHLY') {
+        start = new Date(now.getFullYear(), now.getMonth(), 1)
+        end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    } else if (budget.period === 'YEARLY') {
+        start = new Date(now.getFullYear(), 0, 1)
+        end = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999)
+    } else {
+        return { start: budget.startDate, end: budget.endDate }
+    }
+    // don't count spending from before the budget existed
+    if (budget.startDate > start) start = budget.startDate
+    return { start, end }
+}
+
 export const listBudgetSummary = async(req: ExtendedRequest, res: Response) => {
     const user = ensureUser(req, res)
     if (!user) return
@@ -285,12 +313,13 @@ export const listBudgetSummary = async(req: ExtendedRequest, res: Response) => {
         orderBy: { startDate: 'desc' }
     })
     const summaries = await Promise.all(budgets.map(async budget => {
+        const window = currentBudgetWindow(budget)
         const spentAgg = await prisma.expense.aggregate({
             where: {
                 userId: user.id,
                 expenseDate: {
-                    gte: budget.startDate,
-                    lte: budget.endDate
+                    gte: window.start,
+                    lte: window.end
                 },
                 ...(budget.categoryId ? { categoryId: budget.categoryId } : {})
             },
@@ -299,8 +328,10 @@ export const listBudgetSummary = async(req: ExtendedRequest, res: Response) => {
         const computedSpent = spentAgg._sum.amount || 0
         return {
             ...budget,
-            spent: budget.spent ?? computedSpent,
-            remaining: budget.amount - (budget.spent ?? computedSpent)
+            spent: computedSpent,
+            remaining: budget.amount - computedSpent,
+            windowStart: window.start,
+            windowEnd: window.end
         }
     }))
     res.status(200).json({ status: 200, budgets: summaries })
@@ -390,6 +421,7 @@ export const createBudget = async(req: ExtendedRequest, res: Response) => {
         currency,
         startDate,
         endDate,
+        period,
         categoryId,
         alertThreshold,
         alertEnabled,
@@ -397,7 +429,11 @@ export const createBudget = async(req: ExtendedRequest, res: Response) => {
     } = req.body || {}
 
     const parsedAmount = Number(amount)
-    if (!name || Number.isNaN(parsedAmount) || !startDate || !endDate) {
+    const budgetPeriod = BUDGET_PERIODS.includes(period) ? period : 'ONE_TIME'
+    const isRecurring = budgetPeriod !== 'ONE_TIME'
+
+    // recurring budgets run indefinitely, so only ONE_TIME requires an explicit end date
+    if (!name || Number.isNaN(parsedAmount) || !startDate || (!isRecurring && !endDate)) {
         return res.status(400).json({ status: 400, message: 'name, amount, startDate and endDate are required' })
     }
 
@@ -413,7 +449,8 @@ export const createBudget = async(req: ExtendedRequest, res: Response) => {
             amount: parsedAmount,
             currency: currency || 'USD',
             startDate: new Date(startDate),
-            endDate: new Date(endDate),
+            endDate: isRecurring ? RECURRING_FAR_FUTURE : new Date(endDate),
+            period: budgetPeriod,
             categoryId: categoryId || null,
             alertThreshold: alertThreshold !== undefined ? Number(alertThreshold) : null,
             alertEnabled: typeof alertEnabled === 'undefined' ? true : Boolean(alertEnabled),
@@ -439,6 +476,7 @@ export const updateBudget = async(req: ExtendedRequest, res: Response) => {
         currency,
         startDate,
         endDate,
+        period,
         categoryId,
         alertThreshold,
         alertEnabled,
@@ -450,6 +488,12 @@ export const updateBudget = async(req: ExtendedRequest, res: Response) => {
         if (!category) return res.status(404).json({ status: 404, message: 'Category not found for current user' })
     }
 
+    const nextPeriod = BUDGET_PERIODS.includes(period) ? period : existing.period
+    const nextIsRecurring = nextPeriod !== 'ONE_TIME'
+    const nextEndDate = nextIsRecurring
+        ? RECURRING_FAR_FUTURE
+        : (endDate ? new Date(endDate) : existing.endDate)
+
     const budget = await prisma.budget.update({
         where: { id },
         data: {
@@ -457,7 +501,8 @@ export const updateBudget = async(req: ExtendedRequest, res: Response) => {
             amount: amount !== undefined ? Number(amount) : existing.amount,
             currency: currency || existing.currency,
             startDate: startDate ? new Date(startDate) : existing.startDate,
-            endDate: endDate ? new Date(endDate) : existing.endDate,
+            endDate: nextEndDate,
+            period: nextPeriod,
             categoryId: categoryId !== undefined ? categoryId || null : existing.categoryId,
             alertThreshold: alertThreshold !== undefined ? Number(alertThreshold) : existing.alertThreshold,
             alertEnabled: typeof alertEnabled === 'undefined' ? existing.alertEnabled : Boolean(alertEnabled),
