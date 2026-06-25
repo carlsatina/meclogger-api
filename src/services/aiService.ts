@@ -314,6 +314,86 @@ export async function extractLabReport(
   throw new Error(`Unsupported AI provider: ${provider}`)
 }
 
+// ─── Lab Result Explanation ───────────────────────────────────────────────────
+
+export interface LabExplanationResult {
+  testName: string
+  summary: string
+  measures: string
+  highMeaning: string
+  highCauses: string[]
+  lowMeaning: string
+  lowCauses: string[]
+  prevention: string[]
+  whenToWorry: string
+}
+
+const LAB_EXPLAIN_PROMPT = `You are a medical educator explaining a lab test to a layperson in plain, reassuring language. Given a lab test name, return ONLY a JSON object — no markdown, no explanation.
+
+Return exactly this shape:
+{
+  "testName": "the proper/full name of the test",
+  "summary": "1-2 sentence plain-language overview of what this test is",
+  "measures": "what the test actually measures in the body and why doctors order it",
+  "highMeaning": "what an elevated result generally indicates",
+  "highCauses": ["common cause", "another cause"],
+  "lowMeaning": "what a low result generally indicates",
+  "lowCauses": ["common cause", "another cause"],
+  "prevention": ["practical lifestyle tip", "another tip"],
+  "whenToWorry": "short guidance on when to consult a doctor"
+}
+
+Rules:
+- Use simple, non-alarming language a patient can understand
+- 2-4 items in each array
+- If a test is not typically described as high/low (e.g. qualitative tests), still give the most useful interpretation in those fields
+- Do NOT diagnose or give personalized medical advice; speak in general terms
+- All strings plain text, no markdown`
+
+export async function explainLabResult(
+  provider: string,
+  apiKey: string,
+  testName: string
+): Promise<LabExplanationResult> {
+  const userMessage = `Lab test name: ${testName}`
+
+  if (provider === 'anthropic') {
+    const client = new Anthropic({ apiKey })
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 1024,
+      system: [
+        {
+          type: 'text',
+          text: LAB_EXPLAIN_PROMPT,
+          cache_control: { type: 'ephemeral' }
+        }
+      ] as any,
+      messages: [{ role: 'user', content: userMessage }]
+    })
+    const block = response.content.find(b => b.type === 'text')
+    if (!block || block.type !== 'text') throw new Error('No text response from Anthropic')
+    return parseResult<LabExplanationResult>(block.text)
+  }
+
+  if (provider === 'openai') {
+    const client = new OpenAI({ apiKey })
+    const response = await client.chat.completions.create({
+      model: 'gpt-4o-mini',
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: LAB_EXPLAIN_PROMPT },
+        { role: 'user', content: userMessage }
+      ]
+    })
+    const text = response.choices[0]?.message?.content
+    if (!text) throw new Error('No response from OpenAI')
+    return parseResult<LabExplanationResult>(text)
+  }
+
+  throw new Error(`Unsupported AI provider: ${provider}`)
+}
+
 // ─── Spending Insights ────────────────────────────────────────────────────────
 
 export interface SpendingInsightInput {

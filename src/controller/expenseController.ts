@@ -321,7 +321,11 @@ export const listBudgetSummary = async(req: ExtendedRequest, res: Response) => {
                     gte: window.start,
                     lte: window.end
                 },
-                ...(budget.categoryId ? { categoryId: budget.categoryId } : {})
+                // Category budgets roll up every matching expense in the period;
+                // uncategorized budgets only count expenses explicitly assigned to them.
+                ...(budget.categoryId
+                    ? { categoryId: budget.categoryId }
+                    : { budgetId: budget.id })
             },
             _sum: { amount: true }
         })

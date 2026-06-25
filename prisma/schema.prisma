@@ -169,6 +169,15 @@ model LabResult {
   @@index([profileId, collectedAt])
 }
 
+model LabExplanation {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  testKey   String   @unique
+  testName  String
+  content   Json
+}
+
 model MedicalRecord {
   id           String      @id @default(cuid())
   createdAt    DateTime    @default(now())
